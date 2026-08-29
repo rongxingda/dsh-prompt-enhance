@@ -90,8 +90,10 @@ export function getPanel(): PanelState | undefined {
   return panelState
 }
 
-/** Open (or replace) the panel in the loading phase. */
+/** Open (or replace) the panel in the loading phase. Any in-flight request
+ * from the replaced panel is aborted first, so it cannot become an orphan. */
 export function openLoading(state: Omit<PanelState, 'phase' | 'result' | 'error'>): void {
+  panelState?.abort?.()
   panelState = { ...state, phase: 'loading' }
   notify()
 }

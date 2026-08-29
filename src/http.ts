@@ -8,9 +8,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /**
- * Read a request body of at most `maxBytes` and parse it as JSON. A body past
- * the cap destroys the connection (the caller cannot send anything useful
- * afterwards) before throwing.
+ * Read a request body of at most `maxBytes` and parse it as JSON. On overflow
+ * the reader stops consuming and throws WITHOUT destroying the request — the
+ * route still owes the client a deliverable 413 response. Node discards the
+ * unread remainder and closes the connection after the response ends.
  * @throws 'body too large' past the cap, or the JSON.parse error otherwise.
  */
 export async function readBoundedJson(req: IncomingMessage, maxBytes: number): Promise<unknown> {
@@ -19,10 +20,7 @@ export async function readBoundedJson(req: IncomingMessage, maxBytes: number): P
   for await (const chunk of req) {
     const buffer = chunk as Buffer
     size += buffer.length
-    if (size > maxBytes) {
-      req.destroy()
-      throw new Error('body too large')
-    }
+    if (size > maxBytes) throw new Error('body too large')
     chunks.push(buffer)
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))

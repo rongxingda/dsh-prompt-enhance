@@ -15,7 +15,12 @@ describe('normalizeOutput', () => {
   })
 
   it('keeps fences that are part of the body', () => {
-    const body = '输出示例：\n```\nhello\n```\n结束'
+    const body = '输出示例：\n```\ncode\n```\n结束'
+    expect(normalizeOutput(body)).toBe(body)
+  })
+
+  it('keeps multiple fenced blocks intact instead of stripping the outer pair', () => {
+    const body = '```\n第一块\n```\n```\n第二块\n```'
     expect(normalizeOutput(body)).toBe(body)
   })
 

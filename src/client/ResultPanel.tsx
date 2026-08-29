@@ -41,6 +41,27 @@ function localizedErrorMessage(t: ResultPanelProps['t'], code: EnhanceError['cod
   }
 }
 
+/**
+ * Clipboard fallback for insecure contexts (LAN http), where
+ * `navigator.clipboard` is undefined: a transient textarea plus the legacy
+ * `execCommand('copy')`.
+ */
+function fallbackCopy(text: string): boolean {
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const ok = document.execCommand('copy')
+    textarea.remove()
+    return ok
+  } catch {
+    return false
+  }
+}
+
 /** One enhancement preview overlay. */
 export function ResultPanel(props: ResultPanelProps): ReactNode {
   const { state, t, onApply, onCancel, onRetry } = props
@@ -87,9 +108,15 @@ export function ResultPanel(props: ResultPanelProps): ReactNode {
 
   const copy = useCallback((): void => {
     if (state.result === undefined) return
-    navigator.clipboard
-      .writeText(state.result.text)
-      .then(() => setCopied('ok'), () => setCopied('failed'))
+    const text = state.result.text
+    const done = (ok: boolean): void => setCopied(ok ? 'ok' : 'failed')
+    // navigator.clipboard only exists in secure contexts (https / localhost);
+    // guard the dereference and fall back for plain-http LAN access.
+    if (navigator.clipboard !== undefined) {
+      navigator.clipboard.writeText(text).then(() => done(true), () => done(fallbackCopy(text)))
+      return
+    }
+    done(fallbackCopy(text))
   }, [state.result])
 
   const formatMs = (ms: number): string => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
