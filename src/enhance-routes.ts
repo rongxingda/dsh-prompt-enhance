@@ -19,6 +19,12 @@ import { readBoundedJson, writeJson } from './http'
 /** Envelope slack over the UTF-8 text cap: JSON quoting can inflate ~2-6x in the worst case. */
 const bodyCapOf = (maxInputChars: number): number => maxInputChars * 6 + 4096
 
+/** Per-mount admission state: sliding-window rate stamps + active-call count. */
+interface AdmissionGate {
+  stamps: number[]
+  active: number
+}
+
 /**
  * Serve one enhance POST against the request envelope.
  * @param ctx - registrant context (llm, optional sessions/settings).
@@ -26,7 +32,7 @@ const bodyCapOf = (maxInputChars: number): number => maxInputChars * 6 + 4096
  * @param req - the incoming request.
  * @param res - the outgoing response.
  */
-async function serveEnhance(ctx: Context, readConfig: () => Config, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function serveEnhance(ctx: Context, readConfig: () => Config, gate: AdmissionGate, req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!isTrustedRequest(req)) {
     writeJson(res, 403, { ok: false, error: { code: 'internal', message: 'forbidden: loopback-only' } })
     return
@@ -69,6 +75,21 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
     writeJson(res, 422, { ok: false, error: { code: 'rejected', message: formatInputCheckZh(check) } })
     return
   }
+  // Admission gate (after validation, so only real calls consume budget):
+  // sliding-window rate cap, then concurrency cap. Rejected calls answer 429
+  // with the configured limits so the user can act.
+  const now = Date.now()
+  while (gate.stamps.length > 0 && now - (gate.stamps[0] ?? now) >= 60000) gate.stamps.shift()
+  if (gate.stamps.length >= config.rateLimitPerMinute) {
+    writeJson(res, 429, { ok: false, error: { code: 'rate', message: `请求过于频繁：每分钟最多 ${config.rateLimitPerMinute} 次增强，请稍后再试。` } })
+    return
+  }
+  if (gate.active >= config.maxConcurrent) {
+    writeJson(res, 429, { ok: false, error: { code: 'rate', message: `已有 ${config.maxConcurrent} 个增强在进行中，请等待完成后再试。` } })
+    return
+  }
+  gate.stamps.push(now)
+  gate.active += 1
   // Cancel the model call when the browser goes away mid-flight. `res.close`
   // also fires after a normal response completes, so guard with
   // `writableEnded` — only a premature close aborts the call.
@@ -90,6 +111,7 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
     writeJson(res, wire.code === 'timeout' ? 504 : wire.code === 'unconfigured' ? 409 : 502, { ok: false, error: wire })
   } finally {
     res.off('close', onConnectionClosed)
+    gate.active -= 1
   }
 }
 
@@ -103,9 +125,10 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
 export function registerEnhanceRoute(ctx: Context, readConfig: () => Config): void {
   const webserver = ctx.get('webServer')
   if (webserver === undefined) return
+  const gate: AdmissionGate = { stamps: [], active: 0 }
   webserver.register({
     kind: 'prefix',
     path: ENHANCE_ENDPOINT.replace(/\/enhance$/, ''),
-    handler: (req: IncomingMessage, res: ServerResponse): Promise<void> => serveEnhance(ctx, readConfig, req, res),
+    handler: (req: IncomingMessage, res: ServerResponse): Promise<void> => serveEnhance(ctx, readConfig, gate, req, res),
   })
 }

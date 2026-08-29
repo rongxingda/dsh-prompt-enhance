@@ -22,13 +22,27 @@ describe('resolveConfig', () => {
     expect(() => resolveConfig({ ...DEFAULT_CONFIG, provider: ' ', model: 'glm' })).toThrow(/非空/)
   })
 
+  it('runs deep runtime validation', () => {
+    expect(() => resolveConfig({ ...DEFAULT_CONFIG, temperature: Number.NaN })).toThrow(/temperature/)
+    expect(() => resolveConfig({ ...DEFAULT_CONFIG, maxInputChars: 4096.9 })).toThrow(/maxInputChars/)
+    expect(() => resolveConfig({ ...DEFAULT_CONFIG, timeoutMs: -1 })).toThrow(/timeoutMs/)
+    expect(() => resolveConfig({ ...DEFAULT_CONFIG, enabled: 'yes' as never })).toThrow(/enabled/)
+  })
+
+  it('stores provider/model trimmed', () => {
+    const resolved = resolveConfig({ ...DEFAULT_CONFIG, provider: ' zhipu ', model: ' glm ' })
+    expect(resolved.provider).toBe('zhipu')
+    expect(resolved.model).toBe('glm')
+  })
+
   it('strips unknown keys left over from older versions', () => {
     const legacy = { ...DEFAULT_CONFIG, legacySetting: 'old-value' } as typeof DEFAULT_CONFIG & Record<string, unknown>
     const resolved = resolveConfig(legacy)
     expect(resolved).not.toHaveProperty('legacySetting')
     expect(resolved.enabled).toBe(DEFAULT_CONFIG.enabled)
     expect(Object.keys(resolved).sort()).toEqual([
-      'enabled', 'maxInputChars', 'maxOutputTokens', 'model', 'provider',
+      'enabled', 'maxConcurrent', 'maxInputChars', 'maxOutputTokens', 'model',
+      'provider', 'rateLimitPerMinute',
       'shortcut', 'systemPrompt', 'temperature', 'timeoutMs',
     ])
   })

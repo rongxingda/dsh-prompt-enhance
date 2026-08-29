@@ -30,6 +30,10 @@ export interface Config {
   systemPrompt: string
   /** Composer keyboard shortcut, e.g. "ctrl+alt+e"; empty disables it. */
   shortcut: string
+  /** Max concurrently running enhancements (host-side resource cap). */
+  maxConcurrent: number
+  /** Sliding-window rate cap: enhancements per minute (host-side). */
+  rateLimitPerMinute: number
 }
 
 /** Field defaults, the source of truth for schema defaults and client mirrors. */
@@ -41,6 +45,8 @@ export const DEFAULT_CONFIG: Config = {
   timeoutMs: 60000,
   systemPrompt: '',
   shortcut: 'ctrl+alt+e',
+  maxConcurrent: 2,
+  rateLimitPerMinute: 10,
 }
 
 /** The settings section schema (rendered by the built-in plugin config page). */
@@ -54,6 +60,8 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.number().step(1).min(5000).max(600000).default(DEFAULT_CONFIG.timeoutMs).description('单次增强的超时（毫秒）'),
   systemPrompt: z.string().role('textarea').default(DEFAULT_CONFIG.systemPrompt).description('系统提示词；留空使用内置增强策略，可整体替换'),
   shortcut: z.string().default(DEFAULT_CONFIG.shortcut).description('触发快捷键（如 ctrl+alt+e；须包含 ctrl/alt/meta 中至少一个修饰键，shift 仅可作附加，纯字母/数字或 shift+字母会被忽略；留空禁用）'),
+  maxConcurrent: z.number().step(1).min(1).max(16).default(DEFAULT_CONFIG.maxConcurrent).description('宿主侧并发上限：同时进行的增强调用数，超出的请求返回 429'),
+  rateLimitPerMinute: z.number().step(1).min(1).max(600).default(DEFAULT_CONFIG.rateLimitPerMinute).description('每分钟增强次数上限（滑动窗口），超出返回 429'),
 })
 
 /**
@@ -69,26 +77,39 @@ export const Config: z<Config> = z.object({
  */
 export function resolveConfig(config: Config): Config {
   if (config === null || typeof config !== 'object') throw new Error('prompt-enhance: configuration is required')
+  if (typeof config.enabled !== 'boolean') throw new Error('prompt-enhance: enabled 必须是布尔值')
   const hasProvider = config.provider !== undefined && config.provider !== ''
   const hasModel = config.model !== undefined && config.model !== ''
   if (hasProvider !== hasModel) {
     throw new Error('prompt-enhance: provider 与 model 必须成对填写（要么都填，要么都留空以跟随当前会话模型）')
   }
-  const providerBlank = hasProvider && (config.provider ?? '').trim() === ''
-  const modelBlank = hasModel && (config.model ?? '').trim() === ''
-  if (providerBlank || modelBlank) {
+  const provider = hasProvider ? (config.provider ?? '').trim() : config.provider
+  const model = hasModel ? (config.model ?? '').trim() : config.model
+  if ((hasProvider && provider === '') || (hasModel && model === '')) {
     throw new Error('prompt-enhance: provider/model 覆盖必须是非空字符串')
+  }
+  const temperature = config.temperature
+  if (typeof temperature !== 'number' || !Number.isFinite(temperature) || temperature < 0 || temperature > 1) {
+    throw new Error('prompt-enhance: temperature 必须是 0–1 之间的有限数字')
+  }
+  const intInRange = (value: unknown, name: string, min: number, max: number): number => {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+      throw new Error(`prompt-enhance: ${name} 必须是 ${min}–${max} 之间的整数`)
+    }
+    return value
   }
   return {
     enabled: config.enabled,
-    provider: config.provider,
-    model: config.model,
-    temperature: config.temperature,
-    maxOutputTokens: config.maxOutputTokens,
-    maxInputChars: config.maxInputChars,
-    timeoutMs: config.timeoutMs,
-    systemPrompt: config.systemPrompt,
-    shortcut: config.shortcut,
+    provider,
+    model,
+    temperature,
+    maxOutputTokens: intInRange(config.maxOutputTokens, 'maxOutputTokens', 256, 32768),
+    maxInputChars: intInRange(config.maxInputChars, 'maxInputChars', 200, 200000),
+    timeoutMs: intInRange(config.timeoutMs, 'timeoutMs', 5000, 600000),
+    systemPrompt: typeof config.systemPrompt === 'string' ? config.systemPrompt : '',
+    shortcut: typeof config.shortcut === 'string' ? config.shortcut : '',
+    maxConcurrent: intInRange(config.maxConcurrent, 'maxConcurrent', 1, 16),
+    rateLimitPerMinute: intInRange(config.rateLimitPerMinute, 'rateLimitPerMinute', 1, 600),
   }
 }
 

@@ -10,17 +10,22 @@ const EXCESS_BLANK_LINES = /\n{3,}/g
 
 /**
  * Normalize one model output into the final enhanced prompt body. A wrapping
- * code fence is stripped only when the text STARTS with one, ENDS with one,
- * and contains no other fence lines — fences anywhere else are part of the
- * content (e.g. multiple code blocks) and must survive untouched.
+ * code fence is stripped when the text starts with one, ends with one, and
+ * contains exactly two fence marks (open + close) — this also covers
+ * single-line fences like `` ```角色：翻译``` ``. Fences anywhere else are part
+ * of the content (e.g. multiple code blocks) and must survive untouched.
  * @param raw - the assembled text output of the model.
  * @returns the normalized body; empty string when nothing usable remains.
  */
 export function normalizeOutput(raw: string): string {
   let text = raw.trim()
-  const fenceLineCount = (text.match(/^```/gm) ?? []).length
-  if (text.startsWith('```') && /```[\s]*$/.test(text) && fenceLineCount === 2) {
-    text = text.slice(text.indexOf('\n') + 1).replace(/```[\s]*$/, '').trim()
+  const fenceMarkCount = (text.match(/```/g) ?? []).length
+  if (text.startsWith('```') && /```[\s]*$/.test(text) && fenceMarkCount === 2) {
+    if (text.includes('\n')) {
+      text = text.slice(text.indexOf('\n') + 1).replace(/```[\s]*$/, '').trim()
+    } else {
+      text = text.slice(3, -3).trim()
+    }
   }
   text = text.replace(EXCESS_BLANK_LINES, '\n\n')
   return text.trim()

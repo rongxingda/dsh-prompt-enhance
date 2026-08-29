@@ -19,6 +19,14 @@ describe('normalizeOutput', () => {
     expect(normalizeOutput(body)).toBe(body)
   })
 
+  it('strips single-line fences', () => {
+    expect(normalizeOutput('```角色：翻译```')).toBe('角色：翻译')
+  })
+
+  it('handles CRLF fences', () => {
+    expect(normalizeOutput('```\r\n正文\r\n```')).toBe('正文')
+  })
+
   it('keeps multiple fenced blocks intact instead of stripping the outer pair', () => {
     const body = '```\n第一块\n```\n```\n第二块\n```'
     expect(normalizeOutput(body)).toBe(body)

@@ -20,6 +20,11 @@ describe('checkInputText', () => {
     expect(checkInputText(text, 10)).toEqual({ ok: false, code: 'too-long', count: 11, max: 10 })
   })
 
+  it('counts emoji as one character (Unicode code points)', () => {
+    expect(checkInputText('👍'.repeat(3), 2)).toEqual({ ok: false, code: 'too-long', count: 3, max: 2 })
+    expect(checkInputText('👍'.repeat(2), 2)).toEqual({ ok: true })
+  })
+
   it('accepts text exactly at the cap', () => {
     expect(checkInputText('a'.repeat(10), 10)).toEqual({ ok: true })
   })

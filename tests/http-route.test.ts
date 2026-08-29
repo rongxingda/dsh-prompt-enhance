@@ -75,11 +75,11 @@ function mount(llm: ReturnType<typeof makeLlm>, config = CONFIG): Server {
 }
 
 /** One request against the test server. */
-async function call(server: Server, method: string, body?: string, path = '/prompt-enhance/enhance'): Promise<{ status: number; json: unknown; headers: Headers }> {
+async function call(server: Server, method: string, body?: string, path = '/prompt-enhance/enhance', extraHeaders: Record<string, string> = {}): Promise<{ status: number; json: unknown; headers: Headers }> {
   const { port } = server.address() as AddressInfo
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
-    ...(body !== undefined ? { headers: { 'content-type': 'application/json' }, body } : {}),
+    ...(body !== undefined ? { headers: { 'content-type': 'application/json', ...extraHeaders }, body } : { headers: { ...extraHeaders } }),
   })
   return { status: response.status, json: (await response.json()) as unknown, headers: response.headers }
 }
@@ -210,6 +210,80 @@ describe('POST /prompt-enhance/enhance disconnect handling (real sockets)', () =
       await new Promise((resolve) => setTimeout(resolve, 500))
       expect(seen.length).toBeGreaterThan(0)
       expect(seen[seen.length - 1]).toBe(true)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+})
+
+describe('admission gate: Origin / rate / concurrency', () => {
+  it('refuses cross-site Origins with 403', async () => {
+    const server = mount(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = server.address() as AddressInfo
+      const response = await fetch(`http://127.0.0.1:${port}/prompt-enhance/enhance`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'https://evil.com' },
+        body: JSON.stringify({ text: '写个脚本' }),
+      })
+      expect(response.status).toBe(403)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('accepts same-app local Origins', async () => {
+    const server = mount(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = server.address() as AddressInfo
+      const response = await fetch(`http://127.0.0.1:${port}/prompt-enhance/enhance`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:' + port },
+        body: JSON.stringify({ text: '写个脚本' }),
+      })
+      expect(response.status).toBe(200)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('answers 429 when the per-minute rate cap is hit', async () => {
+    const server = mount(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])), { ...CONFIG, rateLimitPerMinute: 1 })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const first = await call(server, 'POST', JSON.stringify({ text: '第一个' }))
+      expect(first.status).toBe(200)
+      const second = await call(server, 'POST', JSON.stringify({ text: '第二个' }))
+      expect(second.status).toBe(429)
+      expect(second.json).toMatchObject({ ok: false, error: { code: 'rate' } })
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('answers 429 when the concurrency cap is full', async () => {
+    let release!: () => void
+    const gated = new Promise<void>((resolve) => { release = resolve })
+    const gatedStream = (): AsyncIterable<StreamChunk> => (
+      (async function* (): AsyncGenerator<StreamChunk> {
+        await gated
+        yield { type: 'text-delta', index: 0, text: 'x' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })()
+    )
+    const server = mount({ stream: () => gatedStream() } as never, { ...CONFIG, maxConcurrent: 1 })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const first = call(server, 'POST', JSON.stringify({ text: '占用者' }))
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      const second = await call(server, 'POST', JSON.stringify({ text: '后来者' }))
+      expect(second.status).toBe(429)
+      expect(second.json).toMatchObject({ ok: false, error: { code: 'rate' } })
+      release()
+      const firstResult = await first
+      expect(firstResult.status).toBe(200)
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }

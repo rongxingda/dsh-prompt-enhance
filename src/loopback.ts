@@ -28,6 +28,16 @@ function hostnameOf(hostHeader: string): string {
   return colon === -1 ? trimmed : trimmed.slice(0, colon)
 }
 
+/** Origins a web page may come from to call the loopback server (same-app pages). */
+function isTrustedOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && TRUSTED_HOSTNAMES.has(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Full trust check for the plugin's host routes: the socket must be loopback,
  * the Host header must name a loopback host, and no proxy-forwarding headers
@@ -37,12 +47,17 @@ function hostnameOf(hostHeader: string): string {
  * stays allowed: the socket check already bounds it to local processes.
  * Requests carrying `X-Forwarded-For` / `Forwarded` are refused outright:
  * those headers only exist when a proxy is in the path, which this route's
- * trust model does not cover.
+ * trust model does not cover. A browser-supplied `Origin` must be a same-app
+ * local page — this defeats cross-site fire-and-forget POSTs, which always
+ * carry an `Origin` that will not be trusted.
  */
 export function isTrustedRequest(req: IncomingMessage): boolean {
   if (req.headers['x-forwarded-for'] !== undefined || req.headers.forwarded !== undefined) return false
   if (!isLoopbackRequest(req)) return false
   const host = req.headers.host
   if (typeof host !== 'string' || host.trim() === '') return true
-  return TRUSTED_HOSTNAMES.has(hostnameOf(host))
+  if (!TRUSTED_HOSTNAMES.has(hostnameOf(host))) return false
+  const origin = req.headers.origin
+  if (typeof origin === 'string' && origin.trim() !== '' && !isTrustedOrigin(origin)) return false
+  return true
 }

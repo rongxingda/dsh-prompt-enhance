@@ -24,6 +24,7 @@ export const DEFAULT_SYSTEM_PROMPT = [
   'Hard rules:',
   '- Preserve the user\'s intent exactly. Do not remove, alter, or contradict any information the user provided.',
   '- Never fabricate requirements. When a needed detail is unknown, insert a short explicit placeholder such as "(待补充：…)" / "(TBD: …)" instead of making one up.',
+  '- Every addition must be traceable to explicit evidence or a strong implication in the raw prompt; when in doubt, use a placeholder instead of adding content.',
   '- Keep the prompt\'s scope unchanged: do not widen, narrow, or redirect the task.',
   '- Output ONLY the rewritten prompt body. No explanations, no preamble, no comparison with the original, no code fences, no pleasantries.',
   '- Write the rewritten prompt in the SAME language as the user\'s input (Chinese input → Chinese prompt; English input → English prompt).',

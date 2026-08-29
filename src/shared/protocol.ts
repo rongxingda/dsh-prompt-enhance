@@ -29,7 +29,7 @@ export interface EnhanceResult {
 }
 
 /** Stable error codes the browser half maps to localized copy. */
-export type EnhanceErrorCode = 'rejected' | 'timeout' | 'upstream' | 'unconfigured' | 'internal'
+export type EnhanceErrorCode = 'rejected' | 'rate' | 'timeout' | 'upstream' | 'unconfigured' | 'internal'
 
 /** Structured failure carried on every non-2xx / ok:false response. */
 export interface EnhanceError {

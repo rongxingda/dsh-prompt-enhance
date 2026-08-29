@@ -37,6 +37,7 @@ export const zh = {
   'error.unconfigured': '尚未确定增强用的模型：请在插件设置中成对填写 provider/model。',
   'error.upstream': '模型服务返回错误，请重试；原输入未改动。',
   'error.internal': '增强失败，请重试；原输入未改动。',
+  'error.rate': '请求过于频繁或并发已满，请稍后再试。',
 } as const
 
 /** Dictionary key union. */
@@ -75,6 +76,7 @@ export const en: Record<PromptEnhanceKey, string> = {
   'error.unconfigured': 'No model resolved for the enhancement: pair provider/model in the plugin settings.',
   'error.upstream': 'The model provider returned an error. Retry; your draft is untouched.',
   'error.internal': 'Enhancement failed. Retry; your draft is untouched.',
+  'error.rate': 'Too many requests or the concurrency cap is full — retry in a moment.',
 }
 
 /** Both shipped dictionaries, keyed by locale id. */

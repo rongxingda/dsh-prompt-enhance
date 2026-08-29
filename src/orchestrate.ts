@@ -7,9 +7,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { randomUUID } from 'node:crypto'
 import { effectiveSystemPrompt, type Config } from './config'
 import { DEFAULT_SYSTEM_PROMPT } from './prompts'
-import { EnhanceFailure, enhanceText, resolveRoute, type RoutePair } from './enhancer'
+import { EnhanceFailure, enhanceText, resolveRoute, toEnhanceError, type RoutePair } from './enhancer'
 import type { EnhanceResult } from './shared/protocol'
 
 /** Structural face of the sessions store (brand types stay out of the wire path). */
@@ -22,11 +23,12 @@ interface SettingsFace {
   get(ns: string): unknown
 }
 
-/** Narrow an untrusted provider/model pair into a route. */
-function routeOf(config: { provider?: unknown; model?: unknown } | undefined): RoutePair | undefined {
-  if (config === undefined) return undefined
-  const { provider, model } = config
-  if (typeof provider !== 'string' || typeof model !== 'string' || provider === '' || model === '') return undefined
+/** Narrow an untrusted provider/model pair into a route (trimmed). */
+function routeOf(config: { provider?: unknown; model?: unknown } | null | undefined): RoutePair | undefined {
+  if (config === null || config === undefined) return undefined
+  const provider = typeof config.provider === 'string' ? config.provider.trim() : ''
+  const model = typeof config.model === 'string' ? config.model.trim() : ''
+  if (provider === '' || model === '') return undefined
   return { provider, model }
 }
 
@@ -65,25 +67,39 @@ export interface RunEnhanceOptions {
  *   service is absent, or whatever `enhanceText` raised.
  */
 export async function runEnhance(ctx: Context, config: Config, options: RunEnhanceOptions): Promise<EnhanceResult> {
-  const route = resolveRoute(config, options.sessionRoute, defaultRouteOf(ctx))
-  if (route === undefined) {
-    throw new EnhanceFailure({
-      code: 'unconfigured',
-      message: '尚未确定增强用的模型：请在插件设置中成对填写 provider/model，或先在当前会话发送一条消息（将跟随会话模型）。',
+  // Structured, single-line observability: ids and sizes only — never the
+  // prompt text or the model output.
+  const requestId = randomUUID().slice(0, 8)
+  const started = Date.now()
+  let routeText = '?'
+  try {
+    const route = resolveRoute(config, options.sessionRoute, defaultRouteOf(ctx))
+    if (route === undefined) {
+      throw new EnhanceFailure({
+        code: 'unconfigured',
+        message: '尚未确定增强用的模型：请在插件设置中成对填写 provider/model，或先在当前会话发送一条消息（将跟随会话模型）。',
+      })
+    }
+    routeText = `${route.provider}/${route.model}`
+    const llm = ctx.get('llm')
+    if (llm === undefined) {
+      throw new EnhanceFailure({ code: 'internal', message: 'LLM 服务不可用。' })
+    }
+    const result = await enhanceText(llm, {
+      route,
+      system: effectiveSystemPrompt(config, DEFAULT_SYSTEM_PROMPT),
+      text: options.text,
+      temperature: config.temperature,
+      maxTokens: config.maxOutputTokens,
+      timeoutMs: config.timeoutMs,
+      signal: options.signal,
+      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     })
+    console.info(`[prompt-enhance] ${requestId} route=${routeText} in=${options.text.length} out=${result.text.length} ${result.elapsedMs}ms ok`)
+    return result
+  } catch (error) {
+    const wire = toEnhanceError(error)
+    console.info(`[prompt-enhance] ${requestId} route=${routeText} in=${options.text.length} error=${wire.code} ${Date.now() - started}ms`)
+    throw error
   }
-  const llm = ctx.get('llm')
-  if (llm === undefined) {
-    throw new EnhanceFailure({ code: 'internal', message: 'LLM 服务不可用。' })
-  }
-  return enhanceText(llm, {
-    route,
-    system: effectiveSystemPrompt(config, DEFAULT_SYSTEM_PROMPT),
-    text: options.text,
-    temperature: config.temperature,
-    maxTokens: config.maxOutputTokens,
-    timeoutMs: config.timeoutMs,
-    signal: options.signal,
-    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-  })
 }

@@ -17,10 +17,12 @@ const INVISIBLE_CHARS = /[\u200B-\u200D\uFEFF\u202A-\u202E\u2066-\u2069]/g
 
 /**
  * Judge one draft text: non-empty after trimming (invisible characters do
- * not count) and within the configured character cap. Over-length input is
- * rejected, never truncated — truncation would change the user's meaning.
+ * not count) and within the configured character cap. Length counts Unicode
+ * code points (`[...text].length`), matching user perception — an emoji is
+ * one character, not two UTF-16 units. Over-length input is rejected, never
+ * truncated — truncation would change the user's meaning.
  * @param text - the raw draft text.
- * @param maxChars - the configured character cap.
+ * @param maxChars - the configured character cap (in code points).
  * @returns the structured verdict.
  */
 export function checkInputText(text: string, maxChars: number): InputCheck {
@@ -28,8 +30,9 @@ export function checkInputText(text: string, maxChars: number): InputCheck {
   if (stripped.trim().length === 0) {
     return { ok: false, code: 'empty' }
   }
-  if (text.length > maxChars) {
-    return { ok: false, code: 'too-long', count: text.length, max: maxChars }
+  const codePoints = [...text].length
+  if (codePoints > maxChars) {
+    return { ok: false, code: 'too-long', count: codePoints, max: maxChars }
   }
   return { ok: true }
 }

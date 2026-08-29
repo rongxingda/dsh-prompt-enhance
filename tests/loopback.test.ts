@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { isLoopbackRequest, isTrustedRequest } from '../src/loopback'
 
-const req = (fields: { remoteAddress?: string; host?: string; forwarded?: boolean } = {}) =>
+const req = (fields: { remoteAddress?: string; host?: string; forwarded?: boolean; origin?: string } = {}) =>
   ({
     socket: { remoteAddress: fields.remoteAddress ?? '127.0.0.1' },
     headers: {
       ...(fields.host === undefined ? {} : { host: fields.host }),
       ...(fields.forwarded === true ? { 'x-forwarded-for': '203.0.113.7' } : {}),
+      ...(fields.origin === undefined ? {} : { origin: fields.origin }),
     },
   }) as never
 
@@ -41,6 +42,14 @@ describe('isTrustedRequest (DNS-rebinding fence)', () => {
   it('refuses proxy-forwarded requests (X-Forwarded-For present)', () => {
     expect(isTrustedRequest(req({ forwarded: true }))).toBe(false)
     expect(isTrustedRequest(req({ forwarded: true, host: 'localhost' }))).toBe(false)
+  })
+
+  it('refuses cross-site Origins but accepts same-app local Origins', () => {
+    expect(isTrustedRequest(req({ host: 'localhost', origin: 'https://evil.com' }))).toBe(false)
+    expect(isTrustedRequest(req({ host: 'localhost', origin: 'http://evil.com:3080' }))).toBe(false)
+    expect(isTrustedRequest(req({ host: 'localhost', origin: 'http://127.0.0.1:3080' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: 'localhost', origin: 'https://localhost' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: 'localhost', origin: '' }))).toBe(true)
   })
 
   it('still refuses non-loopback sockets regardless of Host', () => {

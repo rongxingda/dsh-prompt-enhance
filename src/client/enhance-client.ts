@@ -5,13 +5,43 @@
  * @module dsh-prompt-enhance/client/enhance-client
  */
 
-import { ENHANCE_ENDPOINT, type EnhanceError, type EnhanceRequestBody, type EnhanceResult } from '../shared/protocol'
+import { ENHANCE_ENDPOINT, type EnhanceError, type EnhanceErrorCode, type EnhanceRequestBody, type EnhanceResult } from '../shared/protocol'
 
 /** Typed fetch failure carrying the wire error. */
 export class EnhanceClientError extends Error {
   constructor(public readonly detail: EnhanceError) {
     super(detail.message)
   }
+}
+
+/** The stable error codes the host may send; anything else normalizes to `internal`. */
+const KNOWN_ERROR_CODES = new Set<EnhanceErrorCode>(['rejected', 'rate', 'timeout', 'upstream', 'unconfigured', 'internal'])
+
+/** Narrow one wire error, normalizing unknown codes. */
+function parseError(value: unknown): EnhanceError {
+  const record = value as Partial<EnhanceError> | null
+  if (record !== null && typeof record === 'object' && typeof record.message === 'string' && record.message !== '') {
+    const code: EnhanceErrorCode = typeof record.code === 'string' && KNOWN_ERROR_CODES.has(record.code as EnhanceErrorCode)
+      ? record.code as EnhanceErrorCode
+      : 'internal'
+    return { code, message: record.message }
+  }
+  return { code: 'internal', message: '宿主服务返回异常。' }
+}
+
+/** Strictly narrow one success value; anything malformed is a client-visible error. */
+function parseResult(value: unknown): EnhanceResult {
+  const record = value as Partial<EnhanceResult> | null
+  if (
+    record !== null && typeof record === 'object'
+    && typeof record.text === 'string' && record.text !== ''
+    && typeof record.provider === 'string' && record.provider !== ''
+    && typeof record.model === 'string' && record.model !== ''
+    && typeof record.elapsedMs === 'number' && Number.isFinite(record.elapsedMs)
+  ) {
+    return { text: record.text, provider: record.provider, model: record.model, elapsedMs: record.elapsedMs }
+  }
+  throw new EnhanceClientError({ code: 'internal', message: '宿主服务返回了无法解析的结果。' })
 }
 
 /** Read and validate the response envelope. */
@@ -24,11 +54,10 @@ async function readEnvelope(response: Response): Promise<EnhanceResult> {
   }
   const envelope = parsed as { ok?: unknown; value?: EnhanceResult; error?: EnhanceError } | null
   if (envelope !== null && typeof envelope === 'object' && envelope.ok === true) {
-    const value = envelope.value
-    if (value !== undefined && typeof value.text === 'string' && value.text !== '') return value
+    return parseResult(envelope.value)
   }
-  if (envelope !== null && typeof envelope === 'object' && envelope.error !== undefined && typeof envelope.error.message === 'string') {
-    throw new EnhanceClientError(envelope.error)
+  if (envelope !== null && typeof envelope === 'object' && envelope.error !== undefined) {
+    throw new EnhanceClientError(parseError(envelope.error))
   }
   throw new EnhanceClientError({ code: 'internal', message: `宿主服务返回异常（HTTP ${response.status}）。` })
 }

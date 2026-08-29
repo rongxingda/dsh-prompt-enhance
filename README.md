@@ -55,6 +55,12 @@ The plugin is one npm package with two halves, following the dsh plugin conventi
 - `dsh >= 0.1.1-rc.1`
 - Node `^22.19.0 || >=24.0.0` (for building from source)
 
+| | |
+|---|---|
+| dsh | `>= 0.1.1-rc.1` |
+| Node | `^22.19.0 \|\| >=24.0.0` |
+| Plugin | `0.1.x` |
+
 ## Install
 
 From npm (recommended):
@@ -95,13 +101,13 @@ dsh plugin --profile web remove dsh-prompt-enhance
 3. The result phase shows both texts side by side. **Apply** fills the enhanced text back and raises the undo bar; **Copy** puts it on the clipboard; **Cancel** (or `Esc`, or clicking the overlay) discards everything.
 4. The undo bar sits above the composer: one click restores the original. If you keep typing after applying, the bar quietly retires itself so stale text can never overwrite newer edits.
 
-**`/enhance <text>`** — rewrite any text from the slash menu. The result renders in the command plane (copyable) and never enters the conversation history or the model's context. To enhance the *composer draft itself*, use the button or shortcut — the draft lives in the browser.
+**`/enhance <text>`** — rewrite any text from the slash menu. The result renders in the command plane (copyable) and never enters the conversation history or the model's context. To enhance the *composer draft itself*, use the button or shortcut — the draft lives in the browser. Cancelling a running `/enhance` follows the harness command plane; if the client offers no cancel affordance, the call simply runs to completion or times out.
 
-**Language consistency** is guaranteed by the rewrite strategy: Chinese in, Chinese out; English in, English out.
+**Language consistency**: the strategy instructs the model to mirror the input language (Chinese in → Chinese out). This is a best-effort instruction, not a hard guarantee.
 
 ## Configuration
 
-Everything lives in the `prompt-enhance` settings namespace, edited from the web GUI's **Settings → 插件配置** page. Changes apply to the very next call — no restart.
+Everything lives in the `prompt-enhance` settings namespace, edited from the web GUI's **Settings → 插件配置** page. Changes apply to the very next call — no restart. Every enhancement is one billable LLM call: `maxOutputTokens` bounds its cost, and the host-side concurrency/rate caps bound how often calls can be made.
 
 | Field | Default | Description |
 |---|---|---|
@@ -109,10 +115,12 @@ Everything lives in the `prompt-enhance` settings namespace, edited from the web
 | `provider` + `model` | empty | Explicit route override; must be filled as a **pair** (or both empty to follow the current session model) |
 | `temperature` | `0.3` | Low temperature keeps the rewrite faithful to the original |
 | `maxOutputTokens` | `2048` | Output token budget of one enhancement call |
-| `maxInputChars` | `12000` | Input character cap; over-limit drafts are **rejected, never truncated** |
+| `maxInputChars` | `12000` | Input character cap (counted in Unicode code points — an emoji is one character); over-limit drafts are **rejected, never truncated** |
 | `timeoutMs` | `60000` | End-to-end deadline of one call |
 | `systemPrompt` | built-in strategy | Replace the whole enhancement strategy if you prefer your own |
 | `shortcut` | `ctrl+alt+e` | Global shortcut spec (at least one modifier + one alphanumeric/function key — bare keys are ignored so normal typing can never be swallowed); empty disables it |
+| `maxConcurrent` | `2` | Host-side concurrency cap; extra requests answer `429` |
+| `rateLimitPerMinute` | `10` | Sliding-window rate cap per minute; extra requests answer `429` |
 | `provider` + `model` values | — | Match the harness settings: each key under `llm-pi-ai.providers` (e.g. `zhipu`, `muyuu`) is a provider and each `models[].id` under it (e.g. `glm-5.3-flash`) is a model. Example pair: `provider: zhipu` + `model: glm-5.3-flash` |
 
 **Model routing precedence:** explicit settings pair → the route recorded in the current session's request header → the harness-wide default model (`agent-default-model`). If none of them names a route (e.g. a fresh session with no default model), the plugin fails with an actionable message instead of guessing.
@@ -156,9 +164,10 @@ The enhance route is served by your own dsh host and reachable **only from this 
 
 - **Socket fence** — requests from non-loopback addresses are refused (`127.0.0.1` / `::1` only). Note this means *any local process* can call the route; it carries no user authentication.
 - **Host allowlist** — the route also validates the `Host` header against `localhost` / `127.0.0.1` / `[::1]`, which defeats DNS-rebinding (a rebound attacker domain keeps the loopback socket address but carries the attacker's hostname and is refused). Responses are `cache-control: no-store`.
+- **Abuse caps** — an `Origin` gate refuses browser calls from non-local pages, and the route enforces a concurrency cap (`maxConcurrent`, default 2) and a per-minute rate limit (`rateLimitPerMinute`, default 10), answering `429` beyond either.
 - **Proxy rejection** — requests carrying `X-Forwarded-For` / `Forwarded` headers are refused outright: those headers only exist when a proxy is in the path, which the trust model does not cover.
 - **Not for reverse-proxy exposure** — if you put dsh web behind a proxy that listens on the LAN, external callers appear as loopback to the route and the fence is moot. Do not expose a proxied host without adding your own authentication at the proxy.
-- **Prompt-injection boundary** — the draft is framed between `<raw_prompt>` tags, literal closing tags inside the draft are neutralized, and the strategy prompt treats the framed text as pure data. Enhancements run with your own credentials and the result is only ever shown back to you.
+- **Prompt-injection boundary** — the draft is framed between `<raw_prompt>` tags, literal closing tags inside the draft are neutralized, and the strategy prompt treats the framed text as pure data. This lowers the risk of simple tag-escape; prompt-based boundaries are best-effort, not a guarantee. Enhancements run with your own credentials and the result is only ever shown back to you.
 
 ## Architecture
 
@@ -232,6 +241,16 @@ Browser → your own dsh host over a loopback-only route → the harness LLM ser
 
 **Does it work with the official DeepSeek route?**
 Yes — it rides `ctx.llm`, so any provider the harness serves (DeepSeek official, OpenAI-compatible gateways) works.
+
+## Manual smoke checklist
+
+After installing and restarting `dsh web`:
+
+1. Settings → 插件配置 shows the `prompt-enhance` section.
+2. The ✨ button sits next to the send button; `Ctrl+Alt+E` triggers the same flow.
+3. Empty input → refusal panel; a valid draft → preview with model info; Apply fills back; Undo restores; Copy works.
+4. `/enhance <text>` renders a copyable result without touching model history.
+5. All three model routes work: pinned settings pair, a session's model, and the harness default.
 
 ## Acknowledgments
 
