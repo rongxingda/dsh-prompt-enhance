@@ -24,7 +24,7 @@ export interface RoutePair {
 }
 
 /** Internal failure carrying the wire error verbatim. */
-class EnhanceFailure extends Error {
+export class EnhanceFailure extends Error {
   constructor(public readonly detail: EnhanceError) {
     super(detail.message)
   }

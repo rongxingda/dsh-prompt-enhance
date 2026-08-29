@@ -10,49 +10,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { ENHANCE_ENDPOINT } from './shared/protocol'
 import { checkInputText, formatInputCheckZh } from './shared/validate'
-import { effectiveSystemPrompt, type Config } from './config'
-import { DEFAULT_SYSTEM_PROMPT } from './prompts'
-import { enhanceText, resolveRoute, toEnhanceError, type RoutePair } from './enhancer'
+import { type Config } from './config'
+import { toEnhanceError } from './enhancer'
+import { runEnhance, sessionRouteOf } from './orchestrate'
 import { isTrustedRequest } from './loopback'
 import { readBoundedJson, writeJson } from './http'
 
-/** Structural face of the sessions store (brand types stay out of the wire path). */
-interface SessionsFace {
-  get(id: string): { requestHeader?: { config?: { provider?: unknown; model?: unknown } } } | undefined
-}
-
-/** Structural face of the settings provider for cross-namespace reads. */
-interface SettingsFace {
-  get(ns: string): unknown
-}
-
 /** Envelope slack over the UTF-8 text cap: JSON quoting can inflate ~2-6x in the worst case. */
 const bodyCapOf = (maxInputChars: number): number => maxInputChars * 6 + 4096
-
-/**
- * The session's logged request route (provider/model of its last request
- * header), when a live session with a request header exists.
- */
-function sessionRouteOf(ctx: Context, sessionId: string | undefined): RoutePair | undefined {
-  if (sessionId === undefined || sessionId === '') return undefined
-  const config = (ctx.get('sessions') as SessionsFace | undefined)?.get(sessionId)?.requestHeader?.config
-  return routeOf(config)
-}
-
-/** The harness-wide default model selection registered by dsh-agent-default-model. */
-export function defaultRouteOf(ctx: Context): RoutePair | undefined {
-  const value = (ctx.get('settings') as SettingsFace | undefined)?.get('agent-default-model')
-  if (value === null || typeof value !== 'object') return undefined
-  return routeOf(value as { provider?: unknown; model?: unknown })
-}
-
-/** Narrow an untrusted provider/model pair into a route. */
-function routeOf(config: { provider?: unknown; model?: unknown } | undefined): RoutePair | undefined {
-  if (config === undefined) return undefined
-  const { provider, model } = config
-  if (typeof provider !== 'string' || typeof model !== 'string' || provider === '' || model === '') return undefined
-  return { provider, model }
-}
 
 /**
  * Serve one enhance POST against the request envelope.
@@ -104,22 +69,6 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
     writeJson(res, 422, { ok: false, error: { code: 'rejected', message: formatInputCheckZh(check) } })
     return
   }
-  const route = resolveRoute(config, sessionRouteOf(ctx, sessionId), defaultRouteOf(ctx))
-  if (route === undefined) {
-    writeJson(res, 409, {
-      ok: false,
-      error: {
-        code: 'unconfigured',
-        message: '尚未确定增强用的模型：请在插件设置中成对填写 provider/model，或先在当前会话发送一条消息（将跟随会话模型）。',
-      },
-    })
-    return
-  }
-  const llm = ctx.get('llm')
-  if (llm === undefined) {
-    writeJson(res, 500, { ok: false, error: { code: 'internal', message: 'LLM 服务不可用。' } })
-    return
-  }
   // Cancel the model call when the browser goes away mid-flight. `res.close`
   // also fires after a normal response completes, so guard with
   // `writableEnded` — only a premature close aborts the call.
@@ -129,13 +78,9 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
   }
   res.on('close', onConnectionClosed)
   try {
-    const value = await enhanceText(llm, {
-      route,
-      system: effectiveSystemPrompt(config, DEFAULT_SYSTEM_PROMPT),
+    const value = await runEnhance(ctx, config, {
       text: record.text,
-      temperature: config.temperature,
-      maxTokens: config.maxOutputTokens,
-      timeoutMs: config.timeoutMs,
+      sessionRoute: sessionRouteOf(ctx, sessionId),
       signal: callerAbort.signal,
       ...sessionId !== undefined ? { sessionId } : {},
     })

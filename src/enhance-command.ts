@@ -10,10 +10,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandInvocation } from '@deepseek-ai/dsh-commands'
 import { checkInputText, formatInputCheckZh } from './shared/validate'
-import { effectiveSystemPrompt, type Config } from './config'
-import { DEFAULT_SYSTEM_PROMPT } from './prompts'
-import { enhanceText, resolveRoute, toEnhanceError, type RoutePair } from './enhancer'
-import { defaultRouteOf } from './enhance-routes'
+import { type Config } from './config'
+import { toEnhanceError } from './enhancer'
+import { defaultRouteOf, runEnhance, sessionRouteOf } from './orchestrate'
 
 /** Structural face of the commands registry (optional service). */
 interface CommandsFace {
@@ -47,27 +46,10 @@ export function registerEnhanceCommand(ctx: Context, readConfig: () => Config): 
       if (!check.ok) {
         return { kind: 'error', text: formatInputCheckZh(check) }
       }
-      const sessionConfig = invocation.agent.session.requestHeader()?.config
-      const sessionRoute: RoutePair | undefined =
-        sessionConfig !== undefined && typeof sessionConfig.provider === 'string' && typeof sessionConfig.model === 'string' && sessionConfig.provider !== '' && sessionConfig.model !== ''
-          ? { provider: sessionConfig.provider, model: sessionConfig.model }
-          : undefined
-      const route = resolveRoute(config, sessionRoute, defaultRouteOf(ctx))
-      if (route === undefined) {
-        return { kind: 'error', text: '尚未确定增强用的模型：请在插件设置中成对填写 provider/model，或先发送一条消息（将跟随会话模型）。' }
-      }
-      const llm = ctx.get('llm')
-      if (llm === undefined) {
-        return { kind: 'error', text: 'LLM 服务不可用。' }
-      }
       try {
-        const value = await enhanceText(llm, {
-          route,
-          system: effectiveSystemPrompt(config, DEFAULT_SYSTEM_PROMPT),
+        const value = await runEnhance(ctx, config, {
           text: raw,
-          temperature: config.temperature,
-          maxTokens: config.maxOutputTokens,
-          timeoutMs: config.timeoutMs,
+          sessionRoute: sessionRouteOf(ctx, invocation.agent.session.id),
           signal: invocation.signal,
           sessionId: invocation.agent.session.id,
         })

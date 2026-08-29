@@ -192,7 +192,7 @@ src/
 ```bash
 npm install
 npm run typecheck     # tsc --noEmit
-npm test              # 56 个单元测试(见下)
+npm test              # 单元 + 真实 HTTP + 组件测试套件
 npm run build         # 类型检查 + 双半区构建
 npm run watch         # esbuild 监听构建双半区
 ```

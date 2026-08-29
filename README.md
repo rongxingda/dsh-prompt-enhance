@@ -193,12 +193,12 @@ Build outputs: `lib/index.js` (host half, ESM, package imports kept external) an
 ```bash
 npm install
 npm run typecheck     # tsc --noEmit
-npm test              # 56 unit tests (see below)
+npm test              # unit + real-http + component suites
 npm run build         # typecheck + both halves
 npm run watch         # esbuild watch for both halves
 ```
 
-**Test coverage:** input validation (empty / invisible characters / over-length), output normalization (fence stripping, blank-line collapsing, empty refusal), the enhancer against stubbed `ctx.llm` streams (happy path, AUTH/NO_ADAPTER/max-tokens finishes, empty output, stalled-stream timeout, pre-aborted caller, route precedence), an end-to-end real-`node:http` suite for the route (loopback fence, method guard, malformed body, structured error envelopes, disabled switch), the undo stack, shortcut parsing/matching, config resolution, and the client settings decoder.
+**Test coverage:** input validation, output normalization, the enhancer against stubbed `ctx.llm` streams, a real-`node:http` route suite (loopback Host fence, disconnect abort, error envelopes), the loopback/Host fence units, prompt framing, config resolution, the undo stack, shortcut parsing, client settings, and React component tests locking the enhance → apply → undo flow (guards, stale marking, diverged-draft undo semantics).
 
 **Release process (maintainers):**
 
