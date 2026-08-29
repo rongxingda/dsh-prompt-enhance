@@ -39,10 +39,7 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
 
   /** Guard chain + fetch + panel transition for this session. */
   const start = useCallback((): void => {
-    if (anyBusy) {
-      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.busy') })
-      return
-    }
+    if (anyBusy) return
     if (!settings.enabled) {
       ui.openError(sessionId, draft, { code: 'rejected', message: t('error.disabled') })
       return
@@ -92,13 +89,23 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
     return ui.registerSession(sessionId, entry)
   }, [sessionId])
 
-  /** Apply the enhanced result: remember the original, then fill back. */
+  // Draft changed after the request started → flag the result panel stale so
+  // the user knows the result is based on the pre-enhance text.
+  useEffect(() => {
+    if (panel !== undefined && panel.sessionId === sessionId && panel.phase === 'result' && !panel.stale && draft !== panel.original) {
+      ui.markStale(sessionId)
+    }
+  }, [draft, panel, sessionId])
+
+  /** Apply the enhanced result: remember the CURRENT draft (pre-apply, so
+   * undo restores exactly this state even if the user typed during the
+   * request), then fill the enhanced text back. */
   const apply = useCallback((): void => {
     if (panel === undefined || panel.phase !== 'result' || panel.result === undefined) return
-    ui.pushUndo(sessionId, { original: panel.original, applied: panel.result.text })
+    ui.pushUndo(sessionId, { original: draft, applied: panel.result.text })
     inputActions.setDraft(panel.result.text)
     ui.closePanel()
-  }, [inputActions, panel, sessionId])
+  }, [draft, inputActions, panel, sessionId])
 
   if (!settings.enabled) return null
 

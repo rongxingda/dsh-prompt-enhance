@@ -167,3 +167,45 @@ describe('POST /prompt-enhance/enhance failure mapping (real http)', () => {
     }
   })
 })
+
+describe('POST /prompt-enhance/enhance disconnect handling (real sockets)', () => {
+  it('aborts the model call when the client disconnects mid-flight', async () => {
+    const seen: boolean[] = []
+    let capturedSignal: AbortSignal | undefined
+    const server = mount({
+      stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        capturedSignal = options.signal
+        return {
+          [Symbol.asyncIterator]: () => ({
+            async next(): Promise<IteratorResult<StreamChunk>> {
+              await new Promise((resolve) => setTimeout(resolve, 120))
+              seen.push(capturedSignal?.aborted ?? false)
+              if (capturedSignal?.aborted) {
+                const error = new Error('aborted')
+                error.name = 'AbortError'
+                throw error
+              }
+              return { done: false, value: { type: 'text-delta', index: 0, text: 'x' } }
+            },
+          }),
+        }
+      },
+    } as never, { ...CONFIG })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    const net = await import('node:net')
+    const socket = net.connect({ port, host: '127.0.0.1' }, () => {
+      const body = JSON.stringify({ text: '写个脚本' })
+      socket.write(`POST /prompt-enhance/enhance HTTP/1.1\r\nHost: 127.0.0.1\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
+      setTimeout(() => socket.destroy(), 80)
+    })
+    socket.on('error', () => {})
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      expect(seen.length).toBeGreaterThan(0)
+      expect(seen[seen.length - 1]).toBe(true)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+})

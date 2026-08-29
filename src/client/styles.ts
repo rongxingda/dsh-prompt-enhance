@@ -112,6 +112,14 @@ export const CSS = `
   border: 2px solid rgba(127,127,127,0.3); border-top-color: #6ea8ff;
   animation: dsh-pe-spin 0.9s linear infinite;
 }
+.dsh-pe-stale {
+  padding: 8px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-top: 1px solid rgba(230, 158, 60, 0.35);
+  background: rgba(230, 158, 60, 0.12);
+  color: #e8c07d;
+}
 .dsh-pe-foot {
   display: flex;
   align-items: center;

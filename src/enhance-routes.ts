@@ -113,11 +113,14 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
     writeJson(res, 500, { ok: false, error: { code: 'internal', message: 'LLM 服务不可用。' } })
     return
   }
-  // Cancel the model call when the browser goes away mid-flight.
+  // Cancel the model call when the browser goes away mid-flight. `res.close`
+  // also fires after a normal response completes, so guard with
+  // `writableEnded` — only a premature close aborts the call.
   const callerAbort = new AbortController()
-  req.on('close', () => {
-    callerAbort.abort()
-  })
+  const onConnectionClosed = (): void => {
+    if (!res.writableEnded) callerAbort.abort()
+  }
+  res.on('close', onConnectionClosed)
   try {
     const value = await enhanceText(llm, {
       route,
@@ -134,7 +137,7 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
     const wire = toEnhanceError(error)
     writeJson(res, wire.code === 'timeout' ? 504 : wire.code === 'unconfigured' ? 409 : 502, { ok: false, error: wire })
   } finally {
-    req.removeAllListeners('close')
+    res.off('close', onConnectionClosed)
   }
 }
 

@@ -21,6 +21,8 @@ export interface PanelState {
   readonly error?: EnhanceError
   /** Cancels the in-flight request; absent once settled. */
   readonly abort?: () => void
+  /** The composer draft changed after the request started — the result is based on the old text. */
+  readonly stale?: boolean
 }
 
 /** One mounted composer trigger (the input.right button's session presence). */
@@ -112,6 +114,17 @@ export function settleError(sessionId: string, error: EnhanceError): void {
 export function openError(sessionId: string, original: string, error: EnhanceError): void {
   panelState?.abort?.()
   panelState = { sessionId, phase: 'error', original, error }
+  notify()
+}
+
+/**
+ * Flag the open result panel as stale: the composer draft changed after the
+ * request started, so the result is based on the old text. Ignored for any
+ * other phase or session.
+ */
+export function markStale(sessionId: string): void {
+  if (panelState?.sessionId !== sessionId || panelState.phase !== 'result' || panelState.stale) return
+  panelState = { ...panelState, stale: true }
   notify()
 }
 

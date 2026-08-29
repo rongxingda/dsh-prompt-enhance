@@ -85,6 +85,9 @@ export function ResultPanel(props: ResultPanelProps): ReactNode {
             </div>
           </div>
         )}
+        {state.phase === 'result' && state.stale && (
+          <div className="dsh-pe-stale">⚠ {t('panel.stale.warn')}</div>
+        )}
         <footer className="dsh-pe-foot">
           <span className="dsh-pe-grow" />
           {state.phase === 'error' && retryable(state.error?.code) && onRetry !== undefined && (
