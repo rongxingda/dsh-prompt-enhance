@@ -29,14 +29,18 @@ function hostnameOf(hostHeader: string): string {
 }
 
 /**
- * Full trust check for the plugin's host routes: the socket must be loopback
- * AND the Host header must name a loopback host. The Host check defeats DNS
- * rebinding — a rebound attacker domain keeps the loopback socket address but
- * carries the attacker's hostname, which is refused here. A missing Host
- * header (HTTP/1.0 style) stays allowed: the socket check already bounds it
- * to local processes.
+ * Full trust check for the plugin's host routes: the socket must be loopback,
+ * the Host header must name a loopback host, and no proxy-forwarding headers
+ * may be present. The Host check defeats DNS rebinding — a rebound attacker
+ * domain keeps the loopback socket address but carries the attacker's
+ * hostname, which is refused here. A missing Host header (HTTP/1.0 style)
+ * stays allowed: the socket check already bounds it to local processes.
+ * Requests carrying `X-Forwarded-For` / `Forwarded` are refused outright:
+ * those headers only exist when a proxy is in the path, which this route's
+ * trust model does not cover.
  */
 export function isTrustedRequest(req: IncomingMessage): boolean {
+  if (req.headers['x-forwarded-for'] !== undefined || req.headers.forwarded !== undefined) return false
   if (!isLoopbackRequest(req)) return false
   const host = req.headers.host
   if (typeof host !== 'string' || host.trim() === '') return true

@@ -156,6 +156,7 @@ export function registerSession(sessionId: string, entry: SessionEntry): () => v
     }
     if (panelState?.sessionId === sessionId) closePanel()
     undoStore.clear(sessionId)
+    notify()
   }
 }
 

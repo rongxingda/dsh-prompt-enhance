@@ -74,7 +74,9 @@ export function resolveConfig(config: Config): Config {
   if (hasProvider !== hasModel) {
     throw new Error('prompt-enhance: provider 与 model 必须成对填写（要么都填，要么都留空以跟随当前会话模型）')
   }
-  if (hasProvider && config.provider!.trim() === '' || hasModel && config.model!.trim() === '') {
+  const providerBlank = hasProvider && (config.provider ?? '').trim() === ''
+  const modelBlank = hasModel && (config.model ?? '').trim() === ''
+  if (providerBlank || modelBlank) {
     throw new Error('prompt-enhance: provider/model 覆盖必须是非空字符串')
   }
   return {

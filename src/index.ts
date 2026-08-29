@@ -30,6 +30,13 @@ export type { EnhanceError, EnhanceResult, EnhanceRequestBody, EnhanceResponse, 
  * Mount the host half. The settings section layers over the composition
  * entry and is re-resolved per request, so Settings → 插件配置 changes reach
  * the very next call.
+ *
+ * Besides the declared `inject` services (llm, webServer — both required),
+ * the host half optionally reads three more through `ctx.get` with
+ * `undefined` fallbacks, degrading gracefully when absent:
+ * - `sessions` — the session's logged request route (model routing);
+ * - `settings` — the harness default model (`agent-default-model`);
+ * - `commands` — the `/enhance` slash command registration.
  * @param ctx - registrant context.
  * @param config - deployment configuration (schema defaults filled by the loader).
  */

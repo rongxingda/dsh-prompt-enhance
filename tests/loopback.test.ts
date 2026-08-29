@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { isLoopbackRequest, isTrustedRequest } from '../src/loopback'
 
-const req = (fields: { remoteAddress?: string; host?: string } = {}) =>
+const req = (fields: { remoteAddress?: string; host?: string; forwarded?: boolean } = {}) =>
   ({
     socket: { remoteAddress: fields.remoteAddress ?? '127.0.0.1' },
-    headers: fields.host === undefined ? {} : { host: fields.host },
+    headers: {
+      ...(fields.host === undefined ? {} : { host: fields.host }),
+      ...(fields.forwarded === true ? { 'x-forwarded-for': '203.0.113.7' } : {}),
+    },
   }) as never
 
 describe('isLoopbackRequest', () => {
@@ -33,6 +36,11 @@ describe('isTrustedRequest (DNS-rebinding fence)', () => {
     expect(isTrustedRequest(req({ host: 'evil.com' }))).toBe(false)
     expect(isTrustedRequest(req({ host: 'evil.com:3080' }))).toBe(false)
     expect(isTrustedRequest(req({ host: 'internal.attacker.example' }))).toBe(false)
+  })
+
+  it('refuses proxy-forwarded requests (X-Forwarded-For present)', () => {
+    expect(isTrustedRequest(req({ forwarded: true }))).toBe(false)
+    expect(isTrustedRequest(req({ forwarded: true, host: 'localhost' }))).toBe(false)
   })
 
   it('still refuses non-loopback sockets regardless of Host', () => {

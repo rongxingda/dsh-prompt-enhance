@@ -15,6 +15,7 @@ import type { InputState } from '@deepseek-ai/dsh-client-ui-conversation'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { EnhanceButton } from '../src/client/EnhanceButton'
 import { UndoBar } from '../src/client/UndoBar'
+import { requestEnhance } from '../src/client/enhance-client'
 import { zh } from '../src/client/locales'
 import * as ui from '../src/client/ui-state'
 
@@ -28,9 +29,6 @@ vi.mock('../src/client/enhance-client', () => ({
   },
   requestEnhance: vi.fn(),
 }))
-
-// eslint-disable-next-line ts/no-require-imports
-const { requestEnhance } = await import('../src/client/enhance-client') as typeof import('../src/client/enhance-client')
 
 const t = ((key: string, params?: Record<string, unknown>): string => {
   let s = (zh as Record<string, string>)[key] ?? key

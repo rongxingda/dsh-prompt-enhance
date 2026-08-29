@@ -41,6 +41,6 @@ export const DEFAULT_SYSTEM_PROMPT = [
  * @returns the user message body.
  */
 export function frameUserPrompt(text: string): string {
-  const safe = text.replace(/<\/(raw_prompt)>/gi, '<\\/$1>')
+  const safe = text.replace(/<\/?(raw_prompt)>/gi, '<\\/$1>')
   return `请重写以下提示词：\n<raw_prompt>\n${safe}\n</raw_prompt>`
 }

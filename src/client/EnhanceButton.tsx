@@ -78,9 +78,12 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   }, [anyBusy, draft, imageCount, occurrenceCount, phase, sessionId, settings, t])
 
   // The session registry holds a stable identity; run always dispatches to
-  // the latest start callback.
+  // the latest start callback. The refresh rides an effect (never the render
+  // phase, which is unsafe under React 18 concurrent rendering).
   const runRef = useRef(start)
-  runRef.current = start
+  useEffect(() => {
+    runRef.current = start
+  })
   useEffect(() => {
     const entry: ui.SessionEntry = {
       root: rootRef.current,
