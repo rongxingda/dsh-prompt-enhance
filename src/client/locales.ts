@@ -86,6 +86,6 @@ export const NS = 'prompt-enhance' as const
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** The prompt-enhance button/panel copy. */
-    [NS]: PromptEnhanceKey
+    'prompt-enhance': PromptEnhanceKey
   }
 }

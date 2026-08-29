@@ -28,6 +28,8 @@
 | ⚙️ **配置热生效** | 模型覆盖、温度、预算、系统提示词、快捷键,全部在 设置 → 插件配置 即改即用 |
 | 🛡️ **草稿安全** | 空输入、超长、仅图片、含命令块在本地拦截;上游失败映射为可读提示;失败绝不改动草稿 |
 
+![dsh web 中实机运行的预览面板:原文与增强结果并排,含模型信息与回填/复制操作](docs/evidence-prompt-enhance-panel.png)
+
 ## 工作原理
 
 ```mermaid
@@ -37,7 +39,7 @@ flowchart LR
     B -- 拒绝 --> P[预览面板:<br/>可读错误,草稿不动]
     C --> D["ctx.llm.stream<br/>按内置策略重写"]
     D --> E[规范化:<br/>剥围栏 / 去空白 / 拒空]
-    E --> F[预览面板:<br/>原文 | 增强结果]
+    E --> F[预览面板:<br/>原文 / 增强结果]
     F -- 回填 --> G["setDraft(增强文本)<br/>原文压入撤销栈"]
     F -- 取消 / 复制 --> H[草稿不动]
     G --> U[撤销条:一键恢复]
@@ -189,6 +191,8 @@ src/
 构建产物:`lib/index.js`(宿主半区,ESM,包引用保持外部)与 `lib/client.js`(浏览器半区,打包为 CJS 并包进 dsh web 壳要求的 `window.__ModuleLoader__.load({ id, factory })` 信封)。两者都随仓库提交,因此 GitHub 直装无需构建;CI 会在 `lib/` 与 `src/` 不一致时拒绝合并。
 
 ## 开发
+
+日常调试闭环(link 安装 + watch):先用 `dsh plugin --profile web add link:...` 装一次,再挂 `npm run watch`;宿主半区改动需重启 `dsh web`——详见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ```bash
 npm install

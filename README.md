@@ -28,6 +28,8 @@ Good agent prompts state *who the model should be*, *what to deliver*, *in what 
 | ⚙️ **Live settings** | Every knob (model override, temperature, budgets, system prompt, shortcut) hot-applies from Settings → 插件配置 |
 | 🛡️ **Draft safety** | Empty, over-length, images-only, and command-chip inputs are rejected locally; upstream failures are mapped to readable messages; the draft is never mutated on failure |
 
+![The preview panel running in dsh web: original and enhanced prompt side by side with model info, fill-back and copy actions](docs/evidence-prompt-enhance-panel.png)
+
 ## How it works
 
 ```mermaid
@@ -37,7 +39,7 @@ flowchart LR
     B -- reject --> P[Preview panel:<br/>readable error, draft untouched]
     C --> D["ctx.llm.stream<br/>rewrite with system strategy"]
     D --> E[Normalize:<br/>strip fences, trim, refuse empty]
-    E --> F[Preview panel:<br/>original | enhanced]
+    E --> F[Preview panel:<br/>original / enhanced]
     F -- Apply --> G["setDraft(enhanced)<br/>original pushed to undo stack"]
     F -- Cancel / Copy --> H[Draft untouched]
     G --> U[Undo bar: one click restores]
@@ -190,6 +192,8 @@ src/
 Build outputs: `lib/index.js` (host half, ESM, package imports kept external) and `lib/client.js` (browser half bundled to CJS inside the `window.__ModuleLoader__.load({ id, factory })` envelope the dsh web shell expects). Both are committed so GitHub installs need no build step; CI fails if `lib/` drifts from `src/`.
 
 ## Development
+
+Daily debug loop (link install + watch): install once via `dsh plugin --profile web add link:...`, run `npm run watch`, and restart `dsh web` after host-half changes — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ```bash
 npm install

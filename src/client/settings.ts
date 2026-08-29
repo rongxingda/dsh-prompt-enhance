@@ -14,6 +14,11 @@ export interface ClientSettings {
   shortcut: string
 }
 
+// Compile-time guarantee: the mirror only tracks keys that exist in the host
+// config — a host-side rename fails this file's typecheck instead of
+// silently desyncing the two defaults.
+type AssertMirror = keyof ClientSettings extends keyof import('../config').Config ? true : never
+const _assertMirror: AssertMirror = true
 /** Defaults mirroring the host `DEFAULT_CONFIG`. */
 export const DEFAULT_CLIENT_SETTINGS: ClientSettings = {
   enabled: true,
