@@ -53,16 +53,18 @@ export const Config: z<Config> = z.object({
   maxInputChars: z.number().step(1).min(200).max(200000).default(DEFAULT_CONFIG.maxInputChars).description('输入字数上限；超限拒绝而不截断，避免改变原意'),
   timeoutMs: z.number().step(1).min(5000).max(600000).default(DEFAULT_CONFIG.timeoutMs).description('单次增强的超时（毫秒）'),
   systemPrompt: z.string().role('textarea').default(DEFAULT_CONFIG.systemPrompt).description('系统提示词；留空使用内置增强策略，可整体替换'),
-  shortcut: z.string().default(DEFAULT_CONFIG.shortcut).description('触发快捷键（如 ctrl+alt+e，留空禁用）'),
+  shortcut: z.string().default(DEFAULT_CONFIG.shortcut).description('触发快捷键（如 ctrl+alt+e；须包含至少一个修饰键，纯字母/数字会被忽略；留空禁用）'),
 })
 
 /**
- * Validate and detach one resolved config. The loader fills schema defaults
- * before apply; this re-checks the invariants the schema cannot express
- * (provider/model pairing, non-empty route strings) so a bad stored section
- * fails loud at the boundary instead of inside a model call.
+ * Validate and detach one resolved config. Unknown keys (leftovers from older
+ * versions) are stripped — only the schema-known fields survive. The loader
+ * fills schema defaults before apply; this re-checks the invariants the
+ * schema cannot express (provider/model pairing, non-empty route strings) so
+ * a bad stored section fails loud at the boundary instead of inside a model
+ * call.
  * @param config - untrusted resolved section.
- * @returns the validated config.
+ * @returns the validated config, unknown keys removed.
  * @throws Error describing the first violated invariant.
  */
 export function resolveConfig(config: Config): Config {
@@ -75,7 +77,17 @@ export function resolveConfig(config: Config): Config {
   if (hasProvider && config.provider!.trim() === '' || hasModel && config.model!.trim() === '') {
     throw new Error('prompt-enhance: provider/model 覆盖必须是非空字符串')
   }
-  return { ...config }
+  return {
+    enabled: config.enabled,
+    provider: config.provider,
+    model: config.model,
+    temperature: config.temperature,
+    maxOutputTokens: config.maxOutputTokens,
+    maxInputChars: config.maxInputChars,
+    timeoutMs: config.timeoutMs,
+    systemPrompt: config.systemPrompt,
+    shortcut: config.shortcut,
+  }
 }
 
 /**

@@ -41,11 +41,11 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const start = useCallback((): void => {
     if (anyBusy) return
     if (!settings.enabled) {
-      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.disabled') })
+      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.disabled'), localized: t('error.disabled') })
       return
     }
     if (imageCount > 0 && draft.trim() === '') {
-      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.imagesOnly') })
+      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.imagesOnly'), localized: t('error.imagesOnly') })
       return
     }
     const check = checkInputText(draft, settings.maxInputChars)
@@ -53,15 +53,15 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
       const message = check.code === 'empty'
         ? t('error.empty')
         : t('error.tooLong', { count: check.count, max: check.max })
-      ui.openError(sessionId, draft, { code: 'rejected', message })
+      ui.openError(sessionId, draft, { code: 'rejected', message, localized: message })
       return
     }
     if (occurrenceCount > 0) {
-      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.occurrences') })
+      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.occurrences'), localized: t('error.occurrences') })
       return
     }
     if (phase !== 'plain') {
-      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.phase') })
+      ui.openError(sessionId, draft, { code: 'rejected', message: t('error.phase'), localized: t('error.phase') })
       return
     }
     const controller = new AbortController()
@@ -89,11 +89,12 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
     return ui.registerSession(sessionId, entry)
   }, [sessionId])
 
-  // Draft changed after the request started → flag the result panel stale so
-  // the user knows the result is based on the pre-enhance text.
+  // Draft changed after the request started → flag (or clear) the result
+  // panel's stale marker so the user knows the result is based on the
+  // pre-enhance text.
   useEffect(() => {
-    if (panel !== undefined && panel.sessionId === sessionId && panel.phase === 'result' && !panel.stale && draft !== panel.original) {
-      ui.markStale(sessionId)
+    if (panel !== undefined && panel.sessionId === sessionId && panel.phase === 'result') {
+      ui.setStale(sessionId, draft !== panel.original)
     }
   }, [draft, panel, sessionId])
 

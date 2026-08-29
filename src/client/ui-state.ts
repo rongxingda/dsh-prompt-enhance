@@ -118,13 +118,13 @@ export function openError(sessionId: string, original: string, error: EnhanceErr
 }
 
 /**
- * Flag the open result panel as stale: the composer draft changed after the
- * request started, so the result is based on the old text. Ignored for any
- * other phase or session.
+ * Flag the open result panel as stale (or clear the flag): stale means the
+ * composer draft changed after the request started, so the result is based
+ * on the old text. Ignored for any other phase or session.
  */
-export function markStale(sessionId: string): void {
-  if (panelState?.sessionId !== sessionId || panelState.phase !== 'result' || panelState.stale) return
-  panelState = { ...panelState, stale: true }
+export function setStale(sessionId: string, stale: boolean): void {
+  if (panelState?.sessionId !== sessionId || panelState.phase !== 'result' || panelState.stale === stale) return
+  panelState = { ...panelState, stale }
   notify()
 }
 
@@ -146,7 +146,12 @@ export function registerSession(sessionId: string, entry: SessionEntry): () => v
   notify()
   return () => {
     if (sessions.get(sessionId) === entry) sessions.delete(sessionId)
-    if (lastMountedSession === sessionId) lastMountedSession = undefined
+    if (lastMountedSession === sessionId) {
+      // Fall back to the most recently mounted session still in the registry
+      // so the shortcut keeps a target in multi-session layouts.
+      const keys = [...sessions.keys()]
+      lastMountedSession = keys[keys.length - 1]
+    }
     if (panelState?.sessionId === sessionId) closePanel()
     undoStore.clear(sessionId)
   }

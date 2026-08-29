@@ -125,15 +125,25 @@ export async function enhanceText(llm: LlmStreamFace, options: EnhanceCallOption
       if (signal.aborted) onAbort()
       else signal.addEventListener('abort', onAbort, { once: true })
     })
+    let exhausted = false
     try {
       while (true) {
         signal.throwIfAborted()
         const next = await Promise.race([iterator.next(), aborted])
-        if (next.done) break
+        if (next.done) {
+          exhausted = true
+          break
+        }
         assembler.push(next.value)
       }
     } finally {
       if (onAbort !== undefined && !signal.aborted) signal.removeEventListener('abort', onAbort)
+      // On timeout/cancel the pending next() never settles, so the loop exits
+      // without exhausting the iterator — prompt the underlying stream to
+      // finalize its connection instead of leaving it to the GC.
+      if (!exhausted) {
+        void Promise.resolve(iterator.return?.()).catch(() => {})
+      }
     }
     signal.throwIfAborted()
     const finishError = finishToDetail(assembler.finish)

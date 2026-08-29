@@ -75,13 +75,13 @@ function mount(llm: ReturnType<typeof makeLlm>, config = CONFIG): Server {
 }
 
 /** One request against the test server. */
-async function call(server: Server, method: string, body?: string): Promise<{ status: number; json: unknown }> {
+async function call(server: Server, method: string, body?: string, path = '/prompt-enhance/enhance'): Promise<{ status: number; json: unknown; headers: Headers }> {
   const { port } = server.address() as AddressInfo
-  const response = await fetch(`http://127.0.0.1:${port}/prompt-enhance/enhance`, {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     ...(body !== undefined ? { headers: { 'content-type': 'application/json' }, body } : {}),
   })
-  return { status: response.status, json: (await response.json()) as unknown }
+  return { status: response.status, json: (await response.json()) as unknown, headers: response.headers }
 }
 
 describe('POST /prompt-enhance/enhance (real http)', () => {
@@ -93,12 +93,18 @@ describe('POST /prompt-enhance/enhance (real http)', () => {
   afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
 
   it('returns the enhanced text with the resolved route', async () => {
-    const { status, json } = await call(server, 'POST', JSON.stringify({ text: '帮我写个爬虫' }))
+    const { status, json, headers } = await call(server, 'POST', JSON.stringify({ text: '帮我写个爬虫' }))
     expect(status).toBe(200)
+    expect(headers.get('cache-control')).toBe('no-store')
     expect(json).toMatchObject({
       ok: true,
       value: { text: '角色：Python 工程师。\n目标：写一个爬虫。', provider: 'zhipu', model: 'glm-5.3' },
     })
+  })
+
+  it('answers 404 for unknown subpaths under the prefix', async () => {
+    const { status } = await call(server, 'POST', JSON.stringify({ text: '写个脚本' }), '/prompt-enhance/anything')
+    expect(status).toBe(404)
   })
 
   it('rejects an empty draft with 422', async () => {

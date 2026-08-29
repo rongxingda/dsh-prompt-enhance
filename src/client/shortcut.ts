@@ -37,7 +37,9 @@ type ModifierFlags = Record<'ctrl' | 'alt' | 'shift' | 'meta', boolean>
 
 /**
  * Parse a user-configured shortcut spec. Whitespace and case are free; the
- * key token must come last; empty spec parses to null (shortcut disabled).
+ * key token must come last; at least one modifier is REQUIRED — a bare key
+ * as a global shortcut would swallow that character everywhere, including
+ * normal typing. Empty spec parses to null (shortcut disabled).
  * @param spec - the raw settings string.
  * @returns the normalized combo, or null when the spec is unusable.
  */
@@ -53,6 +55,7 @@ export function parseShortcut(spec: string | undefined): ShortcutCombo | null {
     if (modifier === undefined) return null
     modifiers[modifier] = true
   }
+  if (!modifiers.ctrl && !modifiers.alt && !modifiers.shift && !modifiers.meta) return null
   return { ...modifiers, key: last }
 }
 

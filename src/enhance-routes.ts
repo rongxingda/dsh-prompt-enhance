@@ -13,7 +13,7 @@ import { checkInputText, formatInputCheckZh } from './shared/validate'
 import { effectiveSystemPrompt, type Config } from './config'
 import { DEFAULT_SYSTEM_PROMPT } from './prompts'
 import { enhanceText, resolveRoute, toEnhanceError, type RoutePair } from './enhancer'
-import { isLoopbackRequest } from './loopback'
+import { isTrustedRequest } from './loopback'
 import { readBoundedJson, writeJson } from './http'
 
 /** Structural face of the sessions store (brand types stay out of the wire path). */
@@ -62,8 +62,14 @@ function routeOf(config: { provider?: unknown; model?: unknown } | undefined): R
  * @param res - the outgoing response.
  */
 async function serveEnhance(ctx: Context, readConfig: () => Config, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!isLoopbackRequest(req)) {
+  if (!isTrustedRequest(req)) {
     writeJson(res, 403, { ok: false, error: { code: 'internal', message: 'forbidden: loopback-only' } })
+    return
+  }
+  // One route, one exact endpoint: anything else under the prefix is unknown.
+  const pathname = new URL(req.url ?? '/', 'http://x').pathname
+  if (pathname !== ENHANCE_ENDPOINT) {
+    writeJson(res, 404, { ok: false, error: { code: 'internal', message: 'not found' } })
     return
   }
   if (req.method !== 'POST') {
@@ -71,6 +77,11 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
     return
   }
   const config = readConfig()
+  // Fail before reading the body when the plugin is switched off.
+  if (!config.enabled) {
+    writeJson(res, 403, { ok: false, error: { code: 'rejected', message: '提示词增强已在设置中关闭。' } })
+    return
+  }
   let body: unknown
   try {
     body = await readBoundedJson(req, bodyCapOf(config.maxInputChars))
@@ -91,10 +102,6 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, req: Incomin
   const check = checkInputText(record.text, config.maxInputChars)
   if (!check.ok) {
     writeJson(res, 422, { ok: false, error: { code: 'rejected', message: formatInputCheckZh(check) } })
-    return
-  }
-  if (!config.enabled) {
-    writeJson(res, 403, { ok: false, error: { code: 'rejected', message: '提示词增强已在设置中关闭。' } })
     return
   }
   const route = resolveRoute(config, sessionRouteOf(ctx, sessionId), defaultRouteOf(ctx))

@@ -6,8 +6,9 @@
  * @module dsh-prompt-enhance/client/ResultPanel
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { EnhanceError } from '../shared/protocol'
 import type { PanelState } from './ui-state'
 
 /** Props of the preview panel. */
@@ -25,22 +26,64 @@ export interface ResultPanelProps {
 /** Whether one error phase is worth retrying (model/transport failures). */
 const retryable = (code: string | undefined): boolean => code === 'upstream' || code === 'timeout' || code === 'internal'
 
+/**
+ * Primary line for a server-side error: localized by the stable code. The
+ * server's own message (host-side Chinese + provider detail) renders beneath
+ * it as the diagnostic detail line.
+ */
+function localizedErrorMessage(t: ResultPanelProps['t'], code: EnhanceError['code']): string {
+  switch (code) {
+    case 'rejected': return t('error.rejected')
+    case 'timeout': return t('error.timeout')
+    case 'unconfigured': return t('error.unconfigured')
+    case 'upstream': return t('error.upstream')
+    default: return t('error.internal')
+  }
+}
+
 /** One enhancement preview overlay. */
 export function ResultPanel(props: ResultPanelProps): ReactNode {
   const { state, t, onApply, onCancel, onRetry } = props
   const [copied, setCopied] = useState<'idle' | 'ok' | 'failed'>('idle')
+  const panelRef = useRef<HTMLElement | null>(null)
 
-  // Escape closes (cancels) the panel; the composer draft is untouched.
+  // Keyboard handling: Escape closes (cancels) the panel — except during IME
+  // composition, where Esc cancels candidate input — and Tab cycles inside
+  // the dialog so focus cannot escape to the page beneath.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.isComposing) return
       if (event.key === 'Escape' && !event.defaultPrevented) {
         event.preventDefault()
         onCancel()
+        return
+      }
+      if (event.key === 'Tab') {
+        const panel = panelRef.current
+        if (panel === null) return
+        const focusables = panel.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, [tabindex]:not([tabindex="-1"])')
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        if (first === undefined || last === undefined) return
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
       }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [onCancel])
+
+  // Move focus into the dialog on open; hand it back to the opener on close.
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    panelRef.current?.focus()
+    return () => previous?.focus()
+  }, [])
 
   const copy = useCallback((): void => {
     if (state.result === undefined) return
@@ -53,7 +96,14 @@ export function ResultPanel(props: ResultPanelProps): ReactNode {
 
   return (
     <div className="dsh-pe-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
-      <section className="dsh-pe-panel" role="dialog" aria-label={t('panel.title')}>
+      <section
+        ref={panelRef}
+        className="dsh-pe-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('panel.title')}
+        tabIndex={-1}
+      >
         <header className="dsh-pe-head">
           <span>✨ {t('panel.title')}</span>
           {state.phase === 'result' && state.result !== undefined && (
@@ -71,7 +121,12 @@ export function ResultPanel(props: ResultPanelProps): ReactNode {
           </div>
         )}
         {state.phase === 'error' && state.error !== undefined && (
-          <div className="dsh-pe-error">{state.error.message}</div>
+          <div className="dsh-pe-error">
+            <div>{state.error.localized ?? localizedErrorMessage(t, state.error.code)}</div>
+            {state.error.localized !== state.error.message && state.error.message !== '' && (
+              <div className="dsh-pe-error-detail">{state.error.message}</div>
+            )}
+          </div>
         )}
         {state.phase === 'result' && state.result !== undefined && (
           <div className="dsh-pe-body">

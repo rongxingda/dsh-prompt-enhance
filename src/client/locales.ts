@@ -30,9 +30,13 @@ export const zh = {
   'error.tooLong': '内容共 {count} 字，超过 {max} 字上限。为避免改变原意不会自动截断，请精简后再试。',
   'error.imagesOnly': '当前只附加了图片，仅支持增强文本内容。',
   'error.occurrences': '输入内容包含命令或文件引用，暂不支持增强；请先移除后再试。',
-  'error.busy': '正在增强中，请稍候或先取消。',
   'error.phase': '当前输入正被占用（提交中），请稍后再试。',
   'error.disabled': '提示词增强已在插件设置中关闭。',
+  'error.rejected': '增强请求被拒绝。',
+  'error.timeout': '增强超时，请重试；原输入未改动。',
+  'error.unconfigured': '尚未确定增强用的模型：请在插件设置中成对填写 provider/model。',
+  'error.upstream': '模型服务返回错误，请重试；原输入未改动。',
+  'error.internal': '增强失败，请重试；原输入未改动。',
 } as const
 
 /** Dictionary key union. */
@@ -64,9 +68,13 @@ export const en: Record<PromptEnhanceKey, string> = {
   'error.tooLong': 'The draft is {count} characters, above the {max} cap. It is never auto-truncated (that would change your meaning) — please shorten it.',
   'error.imagesOnly': 'Only images are attached; prompt enhance supports text only.',
   'error.occurrences': 'The draft contains commands or file references, which are not supported yet — remove them first.',
-  'error.busy': 'An enhancement is already running — wait or cancel it first.',
   'error.phase': 'The input box is busy (submitting) — try again in a moment.',
   'error.disabled': 'Prompt enhance is disabled in the plugin settings.',
+  'error.rejected': 'The enhance request was rejected.',
+  'error.timeout': 'The enhancement timed out. Retry; your draft is untouched.',
+  'error.unconfigured': 'No model resolved for the enhancement: pair provider/model in the plugin settings.',
+  'error.upstream': 'The model provider returned an error. Retry; your draft is untouched.',
+  'error.internal': 'Enhancement failed. Retry; your draft is untouched.',
 }
 
 /** Both shipped dictionaries, keyed by locale id. */

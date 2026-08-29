@@ -34,8 +34,14 @@ export type EnhanceErrorCode = 'rejected' | 'timeout' | 'upstream' | 'unconfigur
 /** Structured failure carried on every non-2xx / ok:false response. */
 export interface EnhanceError {
   code: EnhanceErrorCode
-  /** Human-readable, directly displayable message (Chinese). */
+  /** Human-readable, directly displayable message (Chinese, host-side). */
   message: string
+  /**
+   * Optional pre-localized message the client already rendered in the user's
+   * language (set by client-side guards). When present the client shows it
+   * alone; otherwise it localizes by `code` and shows `message` as detail.
+   */
+  localized?: string
 }
 
 /** Response envelope of the enhance route. */

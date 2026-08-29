@@ -21,6 +21,17 @@ describe('resolveConfig', () => {
   it('rejects blank strings in the pair', () => {
     expect(() => resolveConfig({ ...DEFAULT_CONFIG, provider: ' ', model: 'glm' })).toThrow(/非空/)
   })
+
+  it('strips unknown keys left over from older versions', () => {
+    const legacy = { ...DEFAULT_CONFIG, legacySetting: 'old-value' } as typeof DEFAULT_CONFIG & Record<string, unknown>
+    const resolved = resolveConfig(legacy)
+    expect(resolved).not.toHaveProperty('legacySetting')
+    expect(resolved.enabled).toBe(DEFAULT_CONFIG.enabled)
+    expect(Object.keys(resolved).sort()).toEqual([
+      'enabled', 'maxInputChars', 'maxOutputTokens', 'model', 'provider',
+      'shortcut', 'systemPrompt', 'temperature', 'timeoutMs',
+    ])
+  })
 })
 
 describe('effectiveSystemPrompt', () => {

@@ -20,6 +20,16 @@ describe('parseShortcut', () => {
     expect(parseShortcut('ctrl+f9')?.key).toBe('f9')
   })
 
+  it('rejects bare keys without any modifier (they would swallow typing)', () => {
+    expect(parseShortcut('e')).toBeNull()
+    expect(parseShortcut('1')).toBeNull()
+    expect(parseShortcut('f9')).toBeNull()
+  })
+
+  it('still accepts single-modifier combos', () => {
+    expect(parseShortcut('shift+e')).toEqual({ ctrl: false, alt: false, shift: true, meta: false, key: 'e' })
+  })
+
   it('rejects empty, bare, reversed, and unknown tokens', () => {
     expect(parseShortcut('')).toBeNull()
     expect(parseShortcut('   ')).toBeNull()
