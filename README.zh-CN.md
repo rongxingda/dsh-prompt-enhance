@@ -28,7 +28,7 @@
 | ⚙️ **配置热生效** | 模型覆盖、温度、预算、系统提示词、快捷键,全部在 设置 → 插件配置 即改即用 |
 | 🛡️ **草稿安全** | 空输入、超长、仅图片、含命令块在本地拦截;上游失败映射为可读提示;失败绝不改动草稿 |
 
-![dsh web 中实机运行的预览面板:原文与增强结果并排,含模型信息与回填/复制操作](docs/evidence-prompt-enhance-panel.png)
+![dsh web 中实机运行的预览面板:原文与增强结果并排,含模型信息与回填/复制操作](https://raw.githubusercontent.com/rongxingda/dsh-prompt-enhance/main/docs/evidence-prompt-enhance-panel.png)
 
 ## 工作原理
 

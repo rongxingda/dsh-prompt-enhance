@@ -28,7 +28,7 @@ Good agent prompts state *who the model should be*, *what to deliver*, *in what 
 | ⚙️ **Live settings** | Every knob (model override, temperature, budgets, system prompt, shortcut) hot-applies from Settings → 插件配置 |
 | 🛡️ **Draft safety** | Empty, over-length, images-only, and command-chip inputs are rejected locally; upstream failures are mapped to readable messages; the draft is never mutated on failure |
 
-![The preview panel running in dsh web: original and enhanced prompt side by side with model info, fill-back and copy actions](docs/evidence-prompt-enhance-panel.png)
+![The preview panel running in dsh web: original and enhanced prompt side by side with model info, fill-back and copy actions](https://raw.githubusercontent.com/rongxingda/dsh-prompt-enhance/main/docs/evidence-prompt-enhance-panel.png)
 
 ## How it works
 
