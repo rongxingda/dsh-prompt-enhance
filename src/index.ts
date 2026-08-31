@@ -9,7 +9,6 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { Config, DEFAULT_CONFIG, PROMPT_ENHANCE_NAMESPACE, resolveConfig, type Config as PluginConfig } from './config'
 import { registerEnhanceRoute } from './enhance-routes'
 import { registerEnhanceCommand } from './enhance-command'
@@ -28,6 +27,51 @@ export { ENHANCE_ENDPOINT } from './shared/protocol'
 export type { EnhanceError, EnhanceResult, EnhanceRequestBody, EnhanceResponse, EnhanceErrorCode } from './shared/protocol'
 
 /**
+ * Register the settings section across harness generations.
+ *
+ * `@deepseek-ai/dsh-settings` changed its public surface between the 0.1.1-rc
+ * line and the 0.1.2-alpha line:
+ * - rc (0.1.1-rc.x): standalone `installSettingsSection(ctx, ns, …)` plus the
+ *   `settingsNamespace()` brand helper — both module exports;
+ * - alpha (0.1.2-alpha.x): the same wiring moved onto the service as
+ *   `ctx.settings.installSection(owner, ns, …)`, and the standalone exports
+ *   were removed.
+ *
+ * A static named import of the removed exports is a load-time SyntaxError on
+ * alpha, so this file must not statically import them. Instead the section is
+ * registered through `ctx.inject(['settings'])` — the service-availability
+ * gate both generations use internally — with a runtime probe picking the API
+ * the mounted service actually speaks. The legacy path goes through a dynamic
+ * import so the alpha build never evaluates the removed names.
+ */
+function installSettingsSectionCompat(ctx: Context, namespace: string, schema: unknown, entry: unknown, hooks: {
+  setSource: (source: () => unknown) => void
+  onChange: () => void
+  validate: (value: unknown) => void
+}): void {
+  ctx.inject(['settings'], (settingsCtx: Context) => {
+    const service = (settingsCtx as unknown as { settings?: { installSection?: unknown } }).settings
+    if (typeof service?.installSection === 'function') {
+      ;(service.installSection as (owner: Context, ns: string, schema: unknown, entry: unknown, hooks: unknown) => void)(
+        ctx, namespace, schema, entry, hooks,
+      )
+      return
+    }
+    // Legacy rc line: resolve the standalone helpers lazily. The module itself
+    // exists in both cohorts; only its named exports differ. Types come from
+    // the rc devDependency — on alpha the runtime probe simply never calls it.
+    void import('@deepseek-ai/dsh-settings').then((mod) => {
+      if (typeof mod.installSettingsSection === 'function') {
+        mod.installSettingsSection(ctx, mod.settingsNamespace(namespace), schema as never, entry, hooks as never)
+      }
+    }, () => {
+      // Settings integration is optional by design; the plugin keeps working
+      // on its composition entry when the module cannot be resolved at all.
+    })
+  })
+}
+
+/**
  * Mount the host half. The settings section layers over the composition
  * entry and is re-resolved per request, so Settings → 插件配置 changes reach
  * the very next call.
@@ -43,13 +87,13 @@ export type { EnhanceError, EnhanceResult, EnhanceRequestBody, EnhanceResponse, 
  */
 export function apply(ctx: Context, config: PluginConfig = { ...DEFAULT_CONFIG }): void {
   let current: () => PluginConfig = () => config
-  installSettingsSection(ctx, settingsNamespace(PROMPT_ENHANCE_NAMESPACE), Config, config, {
+  installSettingsSectionCompat(ctx, PROMPT_ENHANCE_NAMESPACE, Config, config, {
     setSource: (source) => {
-      current = source
+      current = source as () => PluginConfig
     },
     onChange: () => {},
     validate: (value) => {
-      resolveConfig(value)
+      resolveConfig(value as PluginConfig)
     },
   })
   // Run the raw settings through resolveConfig so the request path sees the

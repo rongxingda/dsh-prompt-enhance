@@ -52,7 +52,8 @@ The plugin is one npm package with two halves, following the dsh plugin conventi
 
 ## Requirements
 
-- `dsh >= 0.1.1-rc.2` (tested on 0.1.1-rc.2; the 0.1.2-alpha line is compatible too — all 4 client-injected packages exist in the alpha cohort)
+- `dsh >= 0.1.1-rc.2`
+- Boot-verified on `0.1.1-rc.2` and `0.1.2-alpha.3` (layer mounts, enhance route answers, client bundle builds; on alpha the plugin takes the newer `ctx.settings.installSection` registration path). `@deepseek-ai/dsh-settings` broke its registration API between the two lines — the plugin probes at runtime and adapts, no configuration needed.
 - Node `^22.19.0 || >=24.0.0` (for building from source)
 
 | | |

@@ -52,7 +52,8 @@ flowchart LR
 
 ## 环境要求
 
-- `dsh >= 0.1.1-rc.2`(在 0.1.1-rc.2 上实测通过;0.1.2-alpha 系列亦兼容——客户端注入所需的 4 个包在 alpha cohort 中均存活)
+- `dsh >= 0.1.1-rc.2`
+- 实测环境:`0.1.1-rc.2` 与 `0.1.2-alpha.3` 均已 boot 验证(插件层挂载、增强路由应答、客户端 bundle 构建通过;alpha 上走新版 `ctx.settings.installSection` 注册路径)。宿主 `@deepseek-ai/dsh-settings` 的注册 API 在两代之间有破坏性变更,插件按运行时探测自动适配,无需配置。
 - Node `^22.19.0 || >=24.0.0`(仅从源码构建时需要)
 
 | | |
