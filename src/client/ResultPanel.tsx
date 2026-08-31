@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EnhanceError } from '../shared/protocol'
+import { zh, type PromptEnhanceKey } from './locales'
 import type { PanelState } from './ui-state'
 
 /** Props of the preview panel. */
@@ -27,16 +28,29 @@ export interface ResultPanelProps {
 const retryable = (code: string | undefined): boolean => code === 'upstream' || code === 'timeout' || code === 'internal'
 
 /**
- * Primary line for a server-side error: localized by the stable code. The
- * server's own message (host-side Chinese + provider detail) renders beneath
- * it as the diagnostic detail line.
+ * Primary line for a server-side error, localized by the stable code and its
+ * structured params: an upstream `reason` picks a specific fix hint when one
+ * exists, and an over-length rejection reuses the too-long input message the
+ * client-side guard shows. The server's `message` (provider raw text, config
+ * errors) renders beneath as the diagnostic detail line.
  */
-function localizedErrorMessage(t: ResultPanelProps['t'], code: EnhanceError['code']): string {
+function localizedErrorMessage(
+  t: ResultPanelProps['t'],
+  code: EnhanceError['code'],
+  params: EnhanceError['params'],
+): string {
+  if (code === 'rejected' && typeof params?.count === 'number' && typeof params?.max === 'number') {
+    return t('error.tooLong', { count: params.count, max: params.max })
+  }
+  if (code === 'upstream' && typeof params?.reason === 'string') {
+    const specific = `error.upstream.${params.reason}` as PromptEnhanceKey
+    if (specific in zh) return t(specific)
+  }
   switch (code) {
     case 'rejected': return t('error.rejected')
-    case 'rate-limit': return t('error.rateLimit')
-    case 'concurrency-limit': return t('error.concurrencyLimit')
-    case 'timeout': return t('error.timeout')
+    case 'rate-limit': return t('error.rateLimit', params)
+    case 'concurrency-limit': return t('error.concurrencyLimit', params)
+    case 'timeout': return t('error.timeout', params)
     case 'unconfigured': return t('error.unconfigured')
     case 'upstream': return t('error.upstream')
     default: return t('error.internal')
@@ -151,9 +165,16 @@ export function ResultPanel(props: ResultPanelProps): ReactNode {
         )}
         {state.phase === 'error' && state.error !== undefined && (
           <div className="dsh-pe-error">
-            <div>{state.error.localized ?? localizedErrorMessage(t, state.error.code)}</div>
-            {state.error.localized !== state.error.message && state.error.message !== '' && (
-              <div className="dsh-pe-error-detail">{state.error.message}</div>
+            {state.error.localized !== undefined ? (
+              // Client-side guard failures carry their own pre-localized copy.
+              <div>{state.error.localized}</div>
+            ) : (
+              <>
+                <div>{localizedErrorMessage(t, state.error.code, state.error.params)}</div>
+                {state.error.message !== undefined && state.error.message !== '' && (
+                  <div className="dsh-pe-error-detail">{state.error.message}</div>
+                )}
+              </>
             )}
           </div>
         )}

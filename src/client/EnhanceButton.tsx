@@ -35,6 +35,12 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const panel = useSyncExternalStore(ui.subscribe, ui.getPanel)
   const rootRef = useRef<HTMLButtonElement | null>(null)
   const busy = panel !== undefined && panel.sessionId === sessionId && panel.phase === 'loading'
+  // The preview panel is a single shared slot, so the UI admits exactly ONE
+  // in-flight enhancement at a time across all sessions: `anyBusy` disables
+  // every other composer's button while one request is loading. This is
+  // deliberately stricter than the host `maxConcurrent` cap (default 2) —
+  // that cap protects the /enhance command plane and multi-client callers,
+  // while the single-panel UI cannot show two loading states anyway.
   const anyBusy = panel !== undefined && panel.phase === 'loading'
 
   /** Guard chain + fetch + panel transition for this session. */

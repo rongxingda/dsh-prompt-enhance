@@ -120,8 +120,8 @@ Everything lives in the `prompt-enhance` settings namespace, edited from the web
 | `systemPrompt` | built-in strategy | Custom strategy text; how it combines with the built-in strategy is set by `strategyMode` |
 | `strategyMode` | `replace-default` | How a custom strategy combines with the built-in one: `replace-default` **swaps it out entirely** (backward compatible, but the built-in hard rules — preserve intent, never fabricate, body-only output, language mirroring — are not retained and must be carried into your own text); `extend-default` **appends your text after the built-in strategy**, keeping those rules in force |
 | `shortcut` | `ctrl+alt+e` | Global shortcut spec (at least one modifier + one alphanumeric/function key — bare keys are ignored so normal typing can never be swallowed); empty disables it |
-| `maxConcurrent` | `2` | Concurrency cap **within a single host process**; extra requests answer `429` (`concurrency-limit`) |
-| `rateLimitPerMinute` | `10` | Sliding-window rate cap per minute, **within a single host process**; extra requests answer `429` (`rate-limit`) with a `Retry-After` in seconds |
+| `maxConcurrent` | `2` | Concurrency cap **within a single host process**; extra requests answer `429` (`concurrency-limit`). The browser UI admits exactly one in-flight request (a single preview panel), so this cap mainly protects the `/enhance` command plane and multi-client callers |
+| `rateLimitPerMinute` | `10` | Sliding-window rate cap per minute, **within a single host process**, counting **successful calls only** — failures (timeout / upstream error / cancellation) never consume the window, so a run of failures cannot rate-limit you out; extra requests answer `429` (`rate-limit`) with a `Retry-After` in seconds |
 | `provider` + `model` values | — | Match the harness settings: each key under `llm-pi-ai.providers` (e.g. `zhipu`, `muyuu`) is a provider and each `models[].id` under it (e.g. `glm-5.3-flash`) is a model. Example pair: `provider: zhipu` + `model: glm-5.3-flash` |
 
 **Model routing precedence:** explicit settings pair → the route recorded in the current session's request header → the harness-wide default model (`agent-default-model`). If none of them names a route (e.g. a fresh session with no default model), the plugin fails with an actionable message instead of guessing.
@@ -150,7 +150,7 @@ Set `systemPrompt` in the settings to use your own strategy; `strategyMode` deci
 | Images attached but no text | Refused: text-only feature |
 | Command or file-reference chips in the draft | Refused: fill-back would destroy the chips |
 | Submitting / busy phase or a request already in flight | Refused with "try again in a moment" |
-| Per-minute cap exceeded | `429` (`rate-limit`) with a `Retry-After` in seconds; the host message names the exact wait |
+| Per-minute cap exceeded | `429` (`rate-limit`) with a `Retry-After` in seconds; the host message names the exact wait. The window counts successful calls only — failures do not consume it |
 | Concurrency cap full | `429` (`concurrency-limit`), no `Retry-After` — a slot frees whenever an in-flight call settles |
 | Upstream model failure | Stable codes mapped to readable hints: `AUTH` → check API key, `RATE_LIMIT` → retry later, `QUOTA_EXCEEDED` → check balance, `CONTEXT_WINDOW_EXCEEDED` → shorten input, `NO_ADAPTER`/unconfigured → configure a model |
 | Output reaches `maxOutputTokens` | Refused with a hint to raise the cap or shorten the draft |
@@ -160,6 +160,40 @@ Set `systemPrompt` in the settings to use your own strategy; `strategyMode` deci
 | Session switch | Panel state, undo stack, and shortcut targeting are per-session; switching closes the panel and clears its undo entries |
 
 Every failure surfaces inside the plugin's own panel; the composer draft is never modified by a failed call, so manual input continues undisturbed.
+
+## Error codes & localization
+
+The host route answers structured errors of the shape `{ code, message?, params? }`: the browser renders its localized primary line from `code` + `params` using the current language dictionary, and `message` — when present — is an optional diagnostic detail (the provider's raw failure text, a config error) shown verbatim beneath the primary line. The `/enhance` command plane has no locale dictionary; a host-side renderer of the same errors produces the Chinese text directly.
+
+| Error code | HTTP status | Browser primary copy (dictionary key) | Params |
+|---|---|---|---|
+| `rejected` | 403 / 413 / 415 / 422 | generic `error.rejected`; with `{ count, max }` it reuses `error.tooLong` | over-length input: `{ count, max }` |
+| `rate-limit` | 429 | `error.rateLimit` | `{ limit, retryAfterSeconds }` |
+| `concurrency-limit` | 429 | `error.concurrencyLimit` | `{ max }` |
+| `timeout` | 504 | `error.timeout` | `{ seconds }` |
+| `unconfigured` | 409 | `error.unconfigured` | — |
+| `upstream` | 502 | generic `error.upstream`; with `reason` it uses `error.upstream.{reason}` (`auth` / `invalidCredential` / `rateLimit` / `quota` / `empty` / `contextWindow` / `toolCall` / `maxTokens`) | `{ reason }` |
+| `internal` | 500 / 502 | `error.internal` | — |
+
+## Troubleshooting
+
+**Button missing / shortcut dead**
+Settings → 插件配置 → `prompt-enhance` section: is `enabled` true? Is the plugin installed (`dsh plugin --profile web list`) and `dsh web` restarted? Any apply error in the browser console?
+
+**"No model resolved for the enhancement"**
+Routing follows settings pair → session model → harness default; if all three are empty there is nothing to call. Pair `provider`/`model` in the settings, or send a message in the current session first so it carries a model route. Check the `agent-default-model` settings section.
+
+**Authentication failures**
+The `message` detail line carries the concrete cause (e.g. 401). Check the provider's API key in the harness credential store; quota/balance problems surface as the `quota` hint.
+
+**Rate-limited (429) right after a run of failures**
+Should not happen — the window counts successes only. If it still does, check whether several profiles/processes are mounted (each counts independently and stacks up) or whether `rateLimitPerMinute` is set too low.
+
+**Poor rewrites (fabrication, dropped requirements, broken formatting)**
+With `strategyMode` set to `replace-default`, a custom `systemPrompt` replaces the built-in strategy entirely — its hard rules (never fabricate, body-only output, mirror the input language) are not retained automatically; carry them into your own text or switch to `extend-default`.
+
+**Behavior changed after upgrading**
+Since 0.1.6 the host no longer sends Chinese primary-line copy: the browser localizes errors by code (`message` is now only a diagnostic detail), and the `rate-limit` window counts successful calls only. No configuration change needed.
 
 ## Security model
 
@@ -181,7 +215,7 @@ src/
 ├── config.ts           schemastery schema + resolution (paired route validation)
 ├── prompts.ts          built-in strategy system prompt + <raw_prompt> framing
 ├── enhancer.ts         the ctx.llm auxiliary call (route resolution, deadline
-│                       racing, finish validation, code → message mapping)
+│                       racing, finish validation, structured errors + host render)
 ├── enhance-routes.ts   POST /prompt-enhance/enhance (loopback fence, body cap)
 ├── enhance-command.ts  /enhance slash command (host command registry)
 ├── loopback.ts         127.0.0.1/::1 fence for the route
@@ -195,7 +229,7 @@ src/
     ├── UndoBar         conversation.input.dock entry: restore affordance
     ├── ui-state.ts     external store shared by components (panel, undo, sessions)
     ├── enhance-client  fetch client with abort + typed errors
-    ├── undo-stack.ts   per-session LIFO (depth 3)
+    ├── undo-stack.ts   per-session LIFO (depth 3, global cap 60, LRU eviction)
     ├── shortcut.ts     pure combo parsing / matching
     ├── settings.ts     client mirror of the settings namespace
     ├── locales.ts      zh + en dictionaries (harness locale namespace)

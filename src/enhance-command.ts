@@ -11,7 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandInvocation } from '@deepseek-ai/dsh-commands'
 import { checkInputText, formatInputCheckZh } from './shared/validate'
 import { type Config } from './config'
-import { toEnhanceError } from './enhancer'
+import { formatEnhanceError, toEnhanceError } from './enhancer'
 import { defaultRouteOf, runEnhance, sessionRouteOf } from './orchestrate'
 
 /** Structural face of the commands registry (optional service). */
@@ -55,7 +55,7 @@ export function registerEnhanceCommand(ctx: Context, readConfig: () => Config): 
         })
         return { kind: 'success', text: value.text }
       } catch (error) {
-        return { kind: 'error', text: toEnhanceError(error).message }
+        return { kind: 'error', text: formatEnhanceError(toEnhanceError(error)) }
       }
     },
   }

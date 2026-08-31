@@ -78,14 +78,12 @@ export async function runEnhance(ctx: Context, config: Config, options: RunEnhan
   try {
     const route = resolveRoute(config, options.sessionRoute, defaultRouteOf(ctx))
     if (route === undefined) {
-      throw new EnhanceFailure({
-        code: 'unconfigured',
-        message: '尚未确定增强用的模型：请在插件设置中成对填写 provider/model，或先在当前会话发送一条消息（将跟随会话模型）。',
-      })
+      // No detail line: the fix instructions are the localized primary copy.
+      throw new EnhanceFailure({ code: 'unconfigured' })
     }
     const llm = ctx.get('llm')
     if (llm === undefined) {
-      throw new EnhanceFailure({ code: 'internal', message: 'LLM 服务不可用。' })
+      throw new EnhanceFailure({ code: 'internal' })
     }
     const result = await enhanceText(llm, {
       route,

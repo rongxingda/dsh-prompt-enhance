@@ -9,7 +9,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { ENHANCE_ENDPOINT } from './shared/protocol'
-import { checkInputText, formatInputCheckZh } from './shared/validate'
+import { checkInputText } from './shared/validate'
 import { type Config } from './config'
 import { toEnhanceError } from './enhancer'
 import { runEnhance, sessionRouteOf } from './orchestrate'
@@ -97,12 +97,27 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
   const sessionId = typeof record.sessionId === 'string' && record.sessionId !== '' ? record.sessionId : undefined
   const check = checkInputText(record.text, config.maxInputChars)
   if (!check.ok) {
-    writeJson(res, 422, { ok: false, error: { code: 'rejected', message: formatInputCheckZh(check) } })
+    // The over-length case carries structured counts so the client renders
+    // its localized too-long message (matching the client-side guard);
+    // empty text (server-side only — the client guards it first) stays generic.
+    writeJson(res, 422, {
+      ok: false,
+      error: check.code === 'too-long'
+        ? { code: 'rejected', params: { count: check.count, max: check.max } }
+        : { code: 'rejected' },
+    })
     return
   }
   // Admission gate (after validation, so only real calls consume budget):
   // sliding-window rate cap, then concurrency cap. Rejected calls answer 429
   // with the configured limits so the user can act.
+  //
+  // The rate window counts SUCCESSFUL calls only — a stamp lands after the
+  // 200 has been written, never on failure. Counting attempts instead would
+  // burn the user's window on a run of timeouts/upstream errors and lock
+  // them out right when the model recovers. The concurrency cap below still
+  // bounds in-flight calls regardless of outcome, so failed calls cannot be
+  // used to hammer the upstream either.
   const now = Date.now()
   while (gate.stamps.length > 0 && now - (gate.stamps[0] ?? now) >= 60000) gate.stamps.shift()
   if (gate.stamps.length >= config.rateLimitPerMinute) {
@@ -113,7 +128,7 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
     res.setHeader('Retry-After', String(retryAfterSeconds))
     writeJson(res, 429, {
       ok: false,
-      error: { code: 'rate-limit', message: `请求过于频繁：每分钟最多 ${config.rateLimitPerMinute} 次增强，请 ${retryAfterSeconds} 秒后再试。` },
+      error: { code: 'rate-limit', params: { limit: config.rateLimitPerMinute, retryAfterSeconds } },
     })
     return
   }
@@ -122,11 +137,10 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
   if (gate.active >= config.maxConcurrent) {
     writeJson(res, 429, {
       ok: false,
-      error: { code: 'concurrency-limit', message: `已有 ${config.maxConcurrent} 个增强在进行中，请等待其中一个完成后再试。` },
+      error: { code: 'concurrency-limit', params: { max: config.maxConcurrent } },
     })
     return
   }
-  gate.stamps.push(now)
   gate.active += 1
   // Cancel the model call when the browser goes away mid-flight. `res.close`
   // also fires after a normal response completes, so guard with
@@ -144,6 +158,10 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
       ...sessionId !== undefined ? { sessionId } : {},
     })
     writeJson(res, 200, { ok: true, value })
+    // Count only on success: failed calls must not consume the sliding window
+    // (see the gate note above). `Date.now()` at completion, not admission,
+    // keeps the window honest — a slow success still counts as one call.
+    gate.stamps.push(Date.now())
   } catch (error) {
     const wire = toEnhanceError(error)
     writeJson(res, wire.code === 'timeout' ? 504 : wire.code === 'unconfigured' ? 409 : 502, { ok: false, error: wire })

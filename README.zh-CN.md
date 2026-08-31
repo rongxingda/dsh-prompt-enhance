@@ -120,8 +120,8 @@ dsh plugin --profile web remove dsh-prompt-enhance
 | `systemPrompt` | 内置策略 | 自定义增强策略文本;与内置策略如何组合见 `strategyMode` |
 | `strategyMode` | `replace-default` | 自定义策略的组合方式:`replace-default` **整体替换**内置策略(向后兼容,但「不改变原意、不编造、只输出正文、镜像输入语言」等硬性约束不会自动保留,需自行写入);`extend-default` 把自定义文本**追加在内置策略之后**,硬性约束继续生效 |
 | `shortcut` | `ctrl+alt+e` | 快捷键规格(至少一个修饰键 + 单个字母/数字/功能键——纯裸键会被忽略,绝不会吞掉正常打字);留空禁用 |
-| `maxConcurrent` | `2` | **单个 Host 进程内**的并发上限;超出的请求返回 `429`(`concurrency-limit`) |
-| `rateLimitPerMinute` | `10` | **单个 Host 进程内**的每分钟滑动窗口限流;超出的请求返回 `429`(`rate-limit`),响应附 `Retry-After` 秒数 |
+| `maxConcurrent` | `2` | **单个 Host 进程内**的并发上限;超出的请求返回 `429`(`concurrency-limit`)。浏览器 UI 因单预览面板天然只允许 1 个在途请求,此上限主要保护 `/enhance` 命令入口与多客户端调用 |
+| `rateLimitPerMinute` | `10` | **单个 Host 进程内**的每分钟滑动窗口限流,只统计**成功完成**的增强——失败(超时 / 上游错误 / 取消)不消耗窗口,连续失败不会把自己限流;超出的请求返回 `429`(`rate-limit`),响应附 `Retry-After` 秒数 |
 | `provider` + `model` 取值 | — | 与 harness 设置一致:设置文件 `llm-pi-ai.providers` 下的键就是 provider(如 `zhipu`、`muyuu`),其 `models[].id` 就是 model(如 `glm-5.3-flash`)。示例:`provider: zhipu` + `model: glm-5.3-flash` |
 
 **模型路由优先级:** 设置成对覆盖 → 当前会话请求头中记录的路由 → 全局默认模型(`agent-default-model`)。三者都指不出路由时(例如全新会话且无默认模型),插件给出可操作的报错而不是乱猜。
@@ -150,7 +150,7 @@ dsh plugin --profile web remove dsh-prompt-enhance
 | 只附加了图片没有文本 | 拒绝:仅支持文本 |
 | 草稿含命令 / 文件引用块 | 拒绝:回填会破坏引用块 |
 | 提交中 / 占用阶段 / 已有请求在途 | 拒绝并提示「稍后再试」 |
-| 每分钟次数超限 | `429`（`rate-limit`），响应携带 `Retry-After` 秒数，宿主消息给出精确等待时长 |
+| 每分钟次数超限 | `429`（`rate-limit`），响应携带 `Retry-After` 秒数，宿主消息给出精确等待时长;窗口只统计成功完成的调用——失败不消耗窗口 |
 | 并发已满 | `429`（`concurrency-limit`），无 `Retry-After`——空出的时机不可预测，等一个在途调用结束即可 |
 | 上游模型失败 | 稳定错误码映射为可读提示:`AUTH` → 检查 API Key、`RATE_LIMIT` → 稍后重试、`QUOTA_EXCEEDED` → 检查余额、`CONTEXT_WINDOW_EXCEEDED` → 精简输入、`NO_ADAPTER`/未配置 → 先配置模型 |
 | 输出达到 `maxOutputTokens` | 拒绝并提示调大上限或精简原文 |
@@ -160,6 +160,40 @@ dsh plugin --profile web remove dsh-prompt-enhance
 | 切换会话 | 面板状态、撤销栈、快捷键目标均按会话隔离;切换即关闭面板并清理撤销记录 |
 
 所有失败只出现在插件自己的面板里;失败的调用绝不修改输入框草稿,手动输入不受任何干扰。
+
+## 错误码与本地化
+
+宿主路由返回的结构化错误形如 `{ code, message?, params? }`:主文案由浏览器按 `code` + `params` 从当前语言字典渲染,`message` 只是可选的诊断细节(如模型服务商的原始报错、配置错误原文),原样展示在主文案下方。`/enhance` 命令平面没有 locale 字典,由宿主侧的同源渲染函数直接产出中文文本。
+
+| 错误码 | HTTP 状态 | 浏览器主文案(字典键) | 参数 |
+|---|---|---|---|
+| `rejected` | 403 / 413 / 415 / 422 | `error.rejected` 通用;携带 `{ count, max }` 时复用 `error.tooLong` | 超长输入: `{ count, max }` |
+| `rate-limit` | 429 | `error.rateLimit` | `{ limit, retryAfterSeconds }` |
+| `concurrency-limit` | 429 | `error.concurrencyLimit` | `{ max }` |
+| `timeout` | 504 | `error.timeout` | `{ seconds }` |
+| `unconfigured` | 409 | `error.unconfigured` | — |
+| `upstream` | 502 | `error.upstream` 通用;携带 `reason` 时用 `error.upstream.{reason}`(如 `auth` / `quota` / `rateLimit` / `empty` / `contextWindow` / `toolCall` / `maxTokens` / `invalidCredential`) | `{ reason }` |
+| `internal` | 500 / 502 | `error.internal` | — |
+
+## 故障排查
+
+**按钮不出现 / 快捷键无响应**
+设置 → 插件配置 → `prompt-enhance` 节的 `enabled` 是否为 `true`;插件是否成功安装(`dsh plugin --profile web list`)并重启了 `dsh web`;浏览器控制台是否有插件应用报错。
+
+**「尚未确定增强用的模型」**
+插件遵循设置成对覆盖 → 当前会话模型 → 全局默认模型的路由优先级,三者都为空时无法调用。在设置中成对填写 `provider`/`model`,或先在当前会话发一条消息让会话带上模型路由。检查 `agent-default-model` 设置节是否配置。
+
+**「鉴权失败」**
+`message` 细节行会带出具体原因(如 401)。检查对应 provider 在 harness 凭据存储中的 API Key;配额/余额问题对应 `quota` 提示。
+
+**连续失败后立刻被限流(429)**
+不应发生——限流窗口只统计成功调用,失败不消耗窗口。若仍遇到,确认同时挂载了多个 profile / 多进程(各自独立计数会叠加),或 `rateLimitPerMinute` 配置过低。
+
+**结果不理想(编造、丢要求、格式乱)**
+`strategyMode` 为 `replace-default` 时自定义 `systemPrompt` 会整体替换内置策略——内置的「不编造、只输出正文、镜像输入语言」等硬性约束不会自动保留,请自行写入;或改用 `extend-default`。
+
+**升级后行为变了**
+0.1.6 起宿主错误不再携带中文主文案,浏览器端按错误码本地化渲染(非中文界面不再混入中文);`rate-limit` 窗口改为只统计成功调用。升级后无需改配置。
 
 ## 安全模型
 
@@ -181,7 +215,7 @@ src/
 ├── config.ts           schemastery 模式 + 解析校验(成对路由)
 ├── prompts.ts          内置策略系统提示词 + <raw_prompt> 框架
 ├── enhancer.ts         ctx.llm 辅助调用(路由解析、超时竞速、finish 校验、
-│                       错误码 → 文案映射)
+│                       结构化错误 code+params + 宿主侧渲染)
 ├── enhance-routes.ts   POST /prompt-enhance/enhance(回环栅栏、限长)
 ├── enhance-command.ts  /enhance 斜杠命令(宿主命令注册表)
 ├── loopback.ts         路由的 127.0.0.1/::1 栅栏
@@ -194,7 +228,7 @@ src/
     ├── UndoBar         conversation.input.dock 条目:恢复入口
     ├── ui-state.ts     组件共享的外部 store(面板、撤销、会话注册表)
     ├── enhance-client  fetch 客户端(可中止 + 类型化错误)
-    ├── undo-stack.ts   按会话的 LIFO 栈(深度 3)
+    ├── undo-stack.ts   按会话的 LIFO 栈(每会话深度 3,全局 60 条,LRU 淘汰)
     ├── shortcut.ts     纯函数的组合键解析 / 匹配
     ├── settings.ts     设置命名空间的客户端镜像
     ├── locales.ts      中英文字典(harness locale 命名空间)

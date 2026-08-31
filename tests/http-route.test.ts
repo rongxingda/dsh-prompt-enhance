@@ -220,7 +220,10 @@ describe('POST /prompt-enhance/enhance failure mapping (real http)', () => {
     try {
       const { status, json } = await call(server, 'POST', JSON.stringify({ text: '写个脚本' }))
       expect(status).toBe(502)
-      expect(json).toMatchObject({ ok: false, error: { code: 'upstream', message: expect.stringContaining('鉴权失败') } })
+      expect(json).toMatchObject({
+        ok: false,
+        error: { code: 'upstream', params: { reason: 'auth' }, message: '401 unauthorized' },
+      })
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
@@ -373,11 +376,36 @@ describe('admission gate: Origin / rate / concurrency', () => {
       expect(first.status).toBe(200)
       const second = await call(server, 'POST', JSON.stringify({ text: '第二个' }))
       expect(second.status).toBe(429)
-      expect(second.json).toMatchObject({ ok: false, error: { code: 'rate-limit' } })
+      expect(second.json).toMatchObject({ ok: false, error: { code: 'rate-limit', params: { limit: 1, retryAfterSeconds: expect.any(Number) } } })
       // The window is bounded, so the route can name the wait exactly.
       const retryAfter = Number(second.headers.get('retry-after'))
       expect(retryAfter).toBeGreaterThan(0)
       expect(retryAfter).toBeLessThanOrEqual(60)
+      expect((second.json as { error: { params: { retryAfterSeconds: number } } }).error.params.retryAfterSeconds).toBe(retryAfter)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('does not burn the rate window on failed calls', async () => {
+    // The window counts successes only: a failed call must not consume the
+    // only slot, or a run of upstream errors would rate-limit the user right
+    // when the model recovers.
+    let calls = 0
+    const server = mount({
+      stream: (): AsyncIterable<StreamChunk> => {
+        calls += 1
+        return calls === 1
+          ? streamOf([], [{ type: 'finish', reason: { kind: 'error', failure: { message: 'boom', code: 'INTERNAL' } } }])
+          : streamOf(['结果'], [{ type: 'finish', reason: { kind: 'stop' } }])
+      },
+    } as never, { ...CONFIG, rateLimitPerMinute: 1 })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const first = await call(server, 'POST', JSON.stringify({ text: '失败' }))
+      expect(first.status).toBe(502)
+      const second = await call(server, 'POST', JSON.stringify({ text: '成功' }))
+      expect(second.status).toBe(200)
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }

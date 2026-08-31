@@ -25,14 +25,18 @@ const KNOWN_ERROR_CODES = new Set<EnhanceErrorCode>([
   'internal',
 ])
 
-/** Narrow one wire error, normalizing unknown codes. */
+/** Narrow one wire error, normalizing unknown codes. `message`/`params` are optional. */
 function parseError(value: unknown): EnhanceError {
   const record = value as Partial<EnhanceError> | null
-  if (record !== null && typeof record === 'object' && typeof record.message === 'string' && record.message !== '') {
+  if (record !== null && typeof record === 'object') {
     const code: EnhanceErrorCode = typeof record.code === 'string' && KNOWN_ERROR_CODES.has(record.code as EnhanceErrorCode)
       ? record.code as EnhanceErrorCode
       : 'internal'
-    return { code, message: record.message }
+    const message = typeof record.message === 'string' && record.message !== '' ? record.message : undefined
+    const params = record.params !== null && typeof record.params === 'object'
+      ? record.params as Record<string, string | number>
+      : undefined
+    return { code, ...(message !== undefined ? { message } : {}), ...(params !== undefined ? { params } : {}) }
   }
   return { code: 'internal', message: '宿主服务返回异常。' }
 }

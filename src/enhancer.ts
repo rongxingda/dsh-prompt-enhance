@@ -11,7 +11,6 @@ import type { GenerateOptions, FinishReason, StreamChunk } from '@deepseek-ai/ds
 import type { EnhanceError, EnhanceResult } from './shared/protocol'
 import { normalizeOutput } from './shared/normalize'
 import { frameUserPrompt } from './prompts'
-
 /** Structural LLM face so tests stub the stream without a Cordis runtime. */
 export interface LlmStreamFace {
   stream(options: GenerateOptions): AsyncIterable<StreamChunk>
@@ -26,7 +25,8 @@ export interface RoutePair {
 /** Internal failure carrying the wire error verbatim. */
 export class EnhanceFailure extends Error {
   constructor(public readonly detail: EnhanceError) {
-    super(detail.message)
+    super(detail.message ?? detail.code)
+    this.name = 'EnhanceFailure'
   }
 }
 
@@ -154,23 +154,24 @@ export async function enhanceText(llm: LlmStreamFace, options: EnhanceCallOption
     if (finishError !== undefined) fail(finishError)
     const blocks = assembler.blocks()
     if (blocks.some((block) => block.type === 'tool-call')) {
-      fail({ code: 'upstream', message: '模型返回了工具调用，提示词增强只需要纯文本；请更换模型后重试。' })
+      fail({ code: 'upstream', params: { reason: 'tool-call' } })
     }
     const joined = blocks.filter((block) => block.type === 'text').map((block) => block.text).join('\n')
     const text = normalizeOutput(joined)
     if (text === '') {
-      fail({ code: 'upstream', message: '模型返回为空，请重试；原输入未改动。' })
+      fail({ code: 'upstream', params: { reason: 'empty' } })
     }
     return { text, provider: options.route.provider, model: options.route.model, elapsedMs: Date.now() - started }
   } catch (error) {
     if (error instanceof EnhanceFailure) throw error
     if (timedOut) {
-      throw new EnhanceFailure({ code: 'timeout', message: `增强超时（${Math.round(options.timeoutMs / 1000)} 秒），可重试；原输入未改动。` })
+      throw new EnhanceFailure({ code: 'timeout', params: { seconds: Math.ceil(options.timeoutMs / 1000) } })
     }
     if (callerAborted || (error instanceof Error && error.name === 'AbortError')) {
-      throw new EnhanceFailure({ code: 'internal', message: '增强已被取消；原输入未改动。' })
+      // Deliberately no detail line: the caller knows it cancelled.
+      throw new EnhanceFailure({ code: 'internal' })
     }
-    throw new EnhanceFailure({ code: 'internal', message: `增强失败：${describe(error)}；原输入未改动。` })
+    throw new EnhanceFailure({ code: 'internal', message: describe(error) })
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', onCallerAbort)
@@ -179,32 +180,50 @@ export async function enhanceText(llm: LlmStreamFace, options: EnhanceCallOption
 
 /**
  * Render the model-request route failure the user can act on. Known stable
- * codes get a fix hint; everything else surfaces the provider message.
+ * codes map to a dedicated `reason` the dictionaries localize; everything
+ * else passes the provider message through as the detail line.
  */
 function finishToDetail(reason: FinishReason): EnhanceError | undefined {
   switch (reason.kind) {
     case 'stop':
       return undefined
     case 'max-tokens':
-      return { code: 'upstream', message: '重写结果达到输出上限（maxOutputTokens），请在设置中调大上限或精简原文后重试。' }
+      return { code: 'upstream', params: { reason: 'max-tokens' } }
     case 'tool-calls':
-      return { code: 'upstream', message: '模型请求了工具调用，提示词增强只需要纯文本；请更换模型后重试。' }
+      return { code: 'upstream', params: { reason: 'tool-call' } }
     case 'error':
     case 'aborted':
-      return { code: mapCode(reason.failure.code), message: upstreamMessage(reason.failure.message, reason.failure.code) }
+      return { code: mapCode(reason.failure.code), message: reason.failure.message, ...upstreamReasonOf(reason.failure.code) }
     default:
-      return { code: 'internal', message: `模型调用以未知方式结束：${String(reason)}` }
+      return { code: 'internal', message: String(reason) }
   }
 }
 
-/** Stable upstream codes with a dedicated fix hint. */
-const CODE_HINTS: Record<string, string> = {
-  AUTH: '鉴权失败：请检查该 provider 的 API Key 配置。',
-  INVALID_CREDENTIAL: '鉴权失败：存储的 API Key 不可用，请修正后重试。',
-  RATE_LIMIT: '模型服务限流，请稍后重试。',
-  QUOTA_EXCEEDED: '模型服务配额/余额不足，请检查账户。',
-  EMPTY_RESPONSE: '模型返回了空响应，请重试。',
-  CONTEXT_WINDOW_EXCEEDED: '输入超出模型上下文窗口，请精简原文或更换模型。',
+/** Stable upstream reasons the dictionaries and formatEnhanceError both know. */
+export type UpstreamReason =
+  | 'auth'
+  | 'invalid-credential'
+  | 'rate-limit'
+  | 'quota'
+  | 'empty'
+  | 'context-window'
+  | 'tool-call'
+  | 'max-tokens'
+
+/** Known provider failure codes with a dedicated fix hint; others stay generic. */
+const REASON_CODES: Record<string, UpstreamReason> = {
+  AUTH: 'auth',
+  INVALID_CREDENTIAL: 'invalid-credential',
+  RATE_LIMIT: 'rate-limit',
+  QUOTA_EXCEEDED: 'quota',
+  EMPTY_RESPONSE: 'empty',
+  CONTEXT_WINDOW_EXCEEDED: 'context-window',
+}
+
+/** The params fragment carrying the fix-hint reason, when the code is known. */
+function upstreamReasonOf(code: string): { params: { reason: UpstreamReason } } | undefined {
+  const reason = REASON_CODES[code]
+  return reason === undefined ? undefined : { params: { reason } }
 }
 
 /** Map a provider failure code onto the wire taxonomy. */
@@ -212,11 +231,39 @@ function mapCode(code: string): EnhanceError['code'] {
   return code === 'NO_ADAPTER' ? 'unconfigured' : 'upstream'
 }
 
-/** Compose the displayable upstream message. */
-function upstreamMessage(message: string, code: string): string {
-  const hint = CODE_HINTS[code]
-  const base = hint ?? `模型服务返回错误：${message}`
-  return `${base}原输入未改动。`
+/** Host-side zh rendering of one wire error, used by the /enhance command plane. */
+const REASON_HINTS: Record<UpstreamReason, string> = {
+  auth: '鉴权失败：请检查该 provider 的 API Key 配置。',
+  'invalid-credential': '鉴权失败：存储的 API Key 不可用，请修正后重试。',
+  'rate-limit': '模型服务限流，请稍后重试。',
+  quota: '模型服务配额/余额不足，请检查账户。',
+  empty: '模型返回了空响应，请重试。',
+  'context-window': '输入超出模型上下文窗口，请精简原文或更换模型。',
+  'tool-call': '模型请求了工具调用，提示词增强只需要纯文本；请更换模型后重试。',
+  'max-tokens': '重写结果达到输出上限（maxOutputTokens），请在设置中调大上限或精简原文后重试。',
+}
+
+/**
+ * Render one wire error into displayable Chinese text for host-side surfaces
+ * (the /enhance command plane has no browser locale dictionary). The primary
+ * line comes from `code`/`params`; a `message` detail (provider raw message,
+ * config error) is appended beneath it when present.
+ */
+export function formatEnhanceError(error: EnhanceError): string {
+  const params = error.params ?? {}
+  let text: string
+  switch (error.code) {
+    case 'rejected': text = '增强请求被拒绝。'; break
+    case 'rate-limit': text = `请求过于频繁：每分钟最多 ${params.limit ?? '?'} 次增强，请 ${params.retryAfterSeconds ?? '稍候'} 秒后再试。`; break
+    case 'concurrency-limit': text = `已有 ${params.max ?? '?'} 个增强在进行中，请等待其中一个完成后再试。`; break
+    case 'timeout': text = `增强超时（${params.seconds ?? '?'} 秒），可重试；原输入未改动。`; break
+    case 'unconfigured': text = '尚未确定增强用的模型：请在插件设置中成对填写 provider/model，或先在当前会话发送一条消息（将跟随会话模型）。'; break
+    case 'upstream': text = typeof params.reason === 'string' ? (REASON_HINTS[params.reason as UpstreamReason] ?? '模型服务返回错误，请重试；原输入未改动。') : '模型服务返回错误，请重试；原输入未改动。'; break
+    default: text = '增强失败，请重试；原输入未改动。'
+  }
+  const detail = error.message
+  if (detail !== undefined && detail !== '') return `${text}\n${detail}`
+  return text
 }
 
 /** Best-effort unknown-error rendering. */
@@ -233,8 +280,8 @@ function describe(error: unknown): string {
 export function toEnhanceError(error: unknown): EnhanceError {
   if (error instanceof EnhanceFailure) return error.detail
   const anyError = error as { detail?: EnhanceError } | null
-  if (anyError !== null && typeof anyError === 'object' && anyError.detail !== undefined && typeof anyError.detail.code === 'string' && typeof anyError.detail.message === 'string') {
+  if (anyError !== null && typeof anyError === 'object' && anyError.detail !== undefined && typeof anyError.detail.code === 'string') {
     return anyError.detail
   }
-  return { code: 'internal', message: `增强失败：${describe(error)}；原输入未改动。` }
+  return { code: 'internal', message: describe(error) }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { enhanceText, resolveRoute, toEnhanceError, type LlmStreamFace, type RoutePair } from '../src/enhancer'
+import { enhanceText, formatEnhanceError, resolveRoute, toEnhanceError, type LlmStreamFace, type RoutePair } from '../src/enhancer'
 
 /** Terminal-finish flavor the helper should emit. */
 interface FinishFlavor {
@@ -67,7 +67,7 @@ describe('enhanceText', () => {
   it('maps an AUTH error finish to a fix hint and keeps the draft untouched', async () => {
     const llm = stubLlm(() => textStream([], { reason: 'error', code: 'AUTH', message: '401' }))
     await expect(enhanceText(llm, baseOptions)).rejects.toMatchObject({
-      detail: { code: 'upstream', message: expect.stringContaining('鉴权失败') },
+      detail: { code: 'upstream', params: { reason: 'auth' }, message: '401' },
     })
   })
 
@@ -79,14 +79,14 @@ describe('enhanceText', () => {
   it('rejects a max-tokens finish', async () => {
     const llm = stubLlm(() => textStream(['部分'], { reason: 'max-tokens' }))
     await expect(enhanceText(llm, baseOptions)).rejects.toMatchObject({
-      detail: { code: 'upstream', message: expect.stringContaining('上限') },
+      detail: { code: 'upstream', params: { reason: 'max-tokens' } },
     })
   })
 
   it('rejects an empty output', async () => {
     const llm = stubLlm(() => textStream(['  '], { reason: 'stop' }))
     await expect(enhanceText(llm, baseOptions)).rejects.toMatchObject({
-      detail: { code: 'upstream', message: expect.stringContaining('为空') },
+      detail: { code: 'upstream', params: { reason: 'empty' } },
     })
   })
 
@@ -96,7 +96,7 @@ describe('enhanceText', () => {
     })
     const llm = stubLlm(() => stall())
     await expect(enhanceText(llm, { ...baseOptions, timeoutMs: 40 })).rejects.toMatchObject({
-      detail: { code: 'timeout', message: expect.stringContaining('超时') },
+      detail: { code: 'timeout', params: { seconds: 1 } },
     })
   })
 
@@ -105,7 +105,7 @@ describe('enhanceText', () => {
     const controller = new AbortController()
     controller.abort()
     await expect(enhanceText(llm, { ...baseOptions, signal: controller.signal })).rejects.toMatchObject({
-      detail: { code: 'internal', message: expect.stringContaining('取消') },
+      detail: { code: 'internal' },
     })
   })
 })
@@ -142,7 +142,30 @@ describe('toEnhanceError', () => {
       expect.unreachable()
     } catch (error) {
       expect(toEnhanceError(error).code).toBe('upstream')
-      expect(toEnhanceError(error).message).toContain('限流')
+      expect(toEnhanceError(error).params).toEqual({ reason: 'rate-limit' })
     }
+  })
+})
+
+describe('formatEnhanceError', () => {
+  it('renders structured errors into displayable Chinese text', () => {
+    expect(formatEnhanceError({ code: 'rate-limit', params: { limit: 10, retryAfterSeconds: 7 } })).toContain('7 秒')
+    expect(formatEnhanceError({ code: 'concurrency-limit', params: { max: 2 } })).toContain('2')
+    expect(formatEnhanceError({ code: 'timeout', params: { seconds: 60 } })).toContain('60 秒')
+    expect(formatEnhanceError({ code: 'unconfigured' })).toContain('provider/model')
+  })
+
+  it('picks a specific hint for known upstream reasons and appends the raw detail', () => {
+    expect(formatEnhanceError({ code: 'upstream', params: { reason: 'auth' } })).toContain('API Key')
+    expect(formatEnhanceError({ code: 'upstream', params: { reason: 'quota' } })).toContain('配额')
+    // Unknown reason falls back to the generic upstream line.
+    expect(formatEnhanceError({ code: 'upstream' })).toContain('模型服务返回错误')
+    // The provider's raw message rides along as the detail line.
+    const withDetail = formatEnhanceError({ code: 'upstream', params: { reason: 'auth' }, message: '401 unauthorized' })
+    expect(withDetail).toContain('401 unauthorized')
+  })
+
+  it('keeps a rejected error short without a detail', () => {
+    expect(formatEnhanceError({ code: 'rejected' })).toBe('增强请求被拒绝。')
   })
 })
