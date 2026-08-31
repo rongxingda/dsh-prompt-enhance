@@ -20,7 +20,7 @@
   },
   "dsh": {
     "engines": {
-      "dsh": ">=0.1.1-rc.1"
+      "dsh": ">=0.1.1-rc.2"
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -28,7 +28,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-slots"

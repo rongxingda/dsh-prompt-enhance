@@ -52,12 +52,12 @@ The plugin is one npm package with two halves, following the dsh plugin conventi
 
 ## Requirements
 
-- `dsh >= 0.1.1-rc.1`
+- `dsh >= 0.1.1-rc.2` (tested on 0.1.1-rc.2; the 0.1.2-alpha line is compatible too — all 4 client-injected packages exist in the alpha cohort)
 - Node `^22.19.0 || >=24.0.0` (for building from source)
 
 | | |
 |---|---|
-| dsh | `>= 0.1.1-rc.1` |
+| dsh | `>= 0.1.1-rc.2` |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Plugin | `0.1.x` |
 

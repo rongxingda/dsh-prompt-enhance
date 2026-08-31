@@ -2,7 +2,11 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); each release also has a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes.
 
-## Unreleased (0.1.6)
+## Unreleased (0.1.7)
+
+Compatibility fix for the 0.1.2-alpha harness cohort, reported in the upstream market review (zhu1090093659/dsh-web#1282): `@deepseek-ai/dsh-client-runtime` was removed upstream (it never published an alpha), so its entry in `dsh.client.inject` failed to resolve on alpha hosts and the plugin would not load. The entry is gone from the inject list — the browser half only ever used the package as a type-only import (`import type`), and the compiled `lib/client.js` has zero runtime references to it, so nothing changes at runtime. The remaining 4 injected packages all publish alphas and stay. `engines.dsh` tightens from `>=0.1.1-rc.1` to `>=0.1.1-rc.2`, the version actually tested (rc.1 predates the runtime package). The devDependency is kept for compile-time type checking only.
+
+## 0.1.6 (2026-08-31)
 
 Errors are now structured: the host sends `{ code, params?, message? }` where `message` is only an optional diagnostic detail (provider raw text, config errors) — the browser renders its localized primary line from `code`/`params` via the locale dictionaries, so non-Chinese UIs no longer see Chinese host copy. `upstream` errors carry an optional `reason` (auth / quota / rateLimit / empty / contextWindow / toolCall / maxTokens / invalidCredential) that picks a specific fix hint; over-length rejections carry `{ count, max }` and reuse the too-long input message. A host-side `formatEnhanceError()` renders the same errors for the `/enhance` command plane, which has no browser dictionary.
 
