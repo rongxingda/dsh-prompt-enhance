@@ -47,15 +47,40 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
     writeJson(res, 405, { ok: false, error: { code: 'internal', message: 'only POST is allowed' } })
     return
   }
-  const config = readConfig()
+  const contentType = req.headers['content-type']
+  if (contentType !== undefined && !String(contentType).toLowerCase().startsWith('application/json')) {
+    writeJson(res, 415, { ok: false, error: { code: 'rejected', message: '仅支持 application/json 请求体。' } })
+    return
+  }
+  let config: Config
+  try {
+    config = readConfig()
+  } catch (error) {
+    // resolveConfig fails loud on an invalid section — surface it instead of
+    // letting the rejection escape the handler.
+    writeJson(res, 500, { ok: false, error: { code: 'internal', message: `prompt-enhance 配置无效：${error instanceof Error ? error.message : String(error)}` } })
+    return
+  }
   // Fail before reading the body when the plugin is switched off.
   if (!config.enabled) {
     writeJson(res, 403, { ok: false, error: { code: 'rejected', message: '提示词增强已在设置中关闭。' } })
     return
   }
+  // Fast reject on a declared body that already exceeds the cap: refuse before
+  // reading a single byte. The streamed cap inside readBoundedJson stays as the
+  // backstop for chunked bodies, which carry no Content-Length at all. A caller
+  // that declares megabytes and dribbles them (or never sends them) must not
+  // hold the connection open, so the socket is destroyed once the 413 lands.
+  const cap = bodyCapOf(config.maxInputChars)
+  const declaredLength = Number(req.headers['content-length'])
+  if (Number.isFinite(declaredLength) && declaredLength > cap) {
+    res.once('finish', () => res.socket?.destroy())
+    writeJson(res, 413, { ok: false, error: { code: 'rejected', message: '请求体超过大小上限。' } })
+    return
+  }
   let body: unknown
   try {
-    body = await readBoundedJson(req, bodyCapOf(config.maxInputChars))
+    body = await readBoundedJson(req, cap)
   } catch (error) {
     const tooLarge = error instanceof Error && error.message === 'body too large'
     writeJson(res, tooLarge ? 413 : 422, {
@@ -81,11 +106,24 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
   const now = Date.now()
   while (gate.stamps.length > 0 && now - (gate.stamps[0] ?? now) >= 60000) gate.stamps.shift()
   if (gate.stamps.length >= config.rateLimitPerMinute) {
-    writeJson(res, 429, { ok: false, error: { code: 'rate', message: `请求过于频繁：每分钟最多 ${config.rateLimitPerMinute} 次增强，请稍后再试。` } })
+    // The window is bounded, so the oldest surviving stamp tells exactly when
+    // a slot frees up — advertise it instead of making the user guess.
+    const oldest = gate.stamps[0] ?? now
+    const retryAfterSeconds = Math.max(1, Math.ceil((60000 - (now - oldest)) / 1000))
+    res.setHeader('Retry-After', String(retryAfterSeconds))
+    writeJson(res, 429, {
+      ok: false,
+      error: { code: 'rate-limit', message: `请求过于频繁：每分钟最多 ${config.rateLimitPerMinute} 次增强，请 ${retryAfterSeconds} 秒后再试。` },
+    })
     return
   }
+  // No Retry-After here: a busy slot frees whenever some in-flight call
+  // settles, which is not a delay this route can predict.
   if (gate.active >= config.maxConcurrent) {
-    writeJson(res, 429, { ok: false, error: { code: 'rate', message: `已有 ${config.maxConcurrent} 个增强在进行中，请等待完成后再试。` } })
+    writeJson(res, 429, {
+      ok: false,
+      error: { code: 'concurrency-limit', message: `已有 ${config.maxConcurrent} 个增强在进行中，请等待其中一个完成后再试。` },
+    })
     return
   }
   gate.stamps.push(now)
@@ -116,15 +154,26 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
 }
 
 /**
+ * Contexts that already own the route. The admission gate is created per
+ * registration, so mounting twice on one context would silently double the
+ * effective limits — exactly the drift a re-applied plugin (reload, re-link)
+ * must not introduce. Re-applying reuses the first mount instead.
+ */
+const mountedContexts = new WeakSet<Context>()
+
+/**
  * Register the /prompt-enhance prefix route on the shared webserver. Absent
  * webserver (non-web composition) is a silent no-op, matching the
- * describe-image family pattern.
+ * describe-image family pattern. A second registration on the same context is
+ * ignored.
  * @param ctx - registrant context; webServer is required.
  * @param readConfig - per-request config reader so settings changes apply immediately.
  */
 export function registerEnhanceRoute(ctx: Context, readConfig: () => Config): void {
   const webserver = ctx.get('webServer')
   if (webserver === undefined) return
+  if (mountedContexts.has(ctx)) return
+  mountedContexts.add(ctx)
   const gate: AdmissionGate = { stamps: [], active: 0 }
   webserver.register({
     kind: 'prefix',

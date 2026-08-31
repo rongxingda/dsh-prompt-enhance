@@ -12,6 +12,7 @@ import { effectiveSystemPrompt, type Config } from './config'
 import { DEFAULT_SYSTEM_PROMPT } from './prompts'
 import { EnhanceFailure, enhanceText, resolveRoute, toEnhanceError, type RoutePair } from './enhancer'
 import type { EnhanceResult } from './shared/protocol'
+import { countText } from './shared/validate'
 
 /** Structural face of the sessions store (brand types stay out of the wire path). */
 interface SessionsFace {
@@ -67,11 +68,13 @@ export interface RunEnhanceOptions {
  *   service is absent, or whatever `enhanceText` raised.
  */
 export async function runEnhance(ctx: Context, config: Config, options: RunEnhanceOptions): Promise<EnhanceResult> {
-  // Structured, single-line observability: ids and sizes only — never the
-  // prompt text or the model output.
+  // Structured, single-line observability: request id and sizes only — never
+  // the prompt text, the model output, or the provider/model names (those can
+  // carry internal gateway or project identifiers). Sizes use the same
+  // code-point gauge the input check reports to the user, so the two never
+  // disagree.
   const requestId = randomUUID().slice(0, 8)
   const started = Date.now()
-  let routeText = '?'
   try {
     const route = resolveRoute(config, options.sessionRoute, defaultRouteOf(ctx))
     if (route === undefined) {
@@ -80,7 +83,6 @@ export async function runEnhance(ctx: Context, config: Config, options: RunEnhan
         message: '尚未确定增强用的模型：请在插件设置中成对填写 provider/model，或先在当前会话发送一条消息（将跟随会话模型）。',
       })
     }
-    routeText = `${route.provider}/${route.model}`
     const llm = ctx.get('llm')
     if (llm === undefined) {
       throw new EnhanceFailure({ code: 'internal', message: 'LLM 服务不可用。' })
@@ -95,11 +97,11 @@ export async function runEnhance(ctx: Context, config: Config, options: RunEnhan
       signal: options.signal,
       ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     })
-    console.info(`[prompt-enhance] ${requestId} route=${routeText} in=${options.text.length} out=${result.text.length} ${result.elapsedMs}ms ok`)
+    console.info(`[prompt-enhance] ${requestId} in=${countText(options.text)} out=${countText(result.text)} ${result.elapsedMs}ms ok`)
     return result
   } catch (error) {
     const wire = toEnhanceError(error)
-    console.info(`[prompt-enhance] ${requestId} route=${routeText} in=${options.text.length} error=${wire.code} ${Date.now() - started}ms`)
+    console.info(`[prompt-enhance] ${requestId} in=${countText(options.text)} error=${wire.code} ${Date.now() - started}ms`)
     throw error
   }
 }

@@ -28,8 +28,21 @@ export interface EnhanceResult {
   elapsedMs: number
 }
 
-/** Stable error codes the browser half maps to localized copy. */
-export type EnhanceErrorCode = 'rejected' | 'rate' | 'timeout' | 'upstream' | 'unconfigured' | 'internal'
+/**
+ * Stable error codes the browser half maps to localized copy. The two
+ * admission rejections are separate codes because their recovery conditions
+ * differ: the per-minute rate cap clears on a known schedule (the route sends
+ * a `Retry-After` in seconds with it), while the concurrency cap clears as
+ * soon as an in-flight call finishes — no predictable delay to advertise.
+ */
+export type EnhanceErrorCode =
+  | 'rejected'
+  | 'rate-limit'
+  | 'concurrency-limit'
+  | 'timeout'
+  | 'upstream'
+  | 'unconfigured'
+  | 'internal'
 
 /** Structured failure carried on every non-2xx / ok:false response. */
 export interface EnhanceError {

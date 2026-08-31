@@ -42,8 +42,14 @@ function streamOf(parts: string[], finish: StreamChunk[]): AsyncIterable<StreamC
   })()
 }
 
-/** Mount apply() against a stub context and expose the route over real HTTP. */
-function mount(llm: ReturnType<typeof makeLlm>, config = CONFIG): Server {
+/** A stub context plus the routes captured from its stub webServer. */
+interface StubContext {
+  ctx: unknown
+  captured: CapturedRoute[]
+}
+
+/** Build a stub context exposing the services the plugin half reads. */
+function stubContext(llm: ReturnType<typeof makeLlm>): StubContext {
   const captured: CapturedRoute[] = []
   const ctx = {
     effect(fn: () => unknown): () => void {
@@ -65,6 +71,12 @@ function mount(llm: ReturnType<typeof makeLlm>, config = CONFIG): Server {
       return () => {}
     },
   }
+  return { ctx, captured }
+}
+
+/** Mount apply() against a stub context and expose the route over real HTTP. */
+function mount(llm: ReturnType<typeof makeLlm>, config = CONFIG): Server {
+  const { ctx, captured } = stubContext(llm)
   apply(ctx as never, config)
   const route = captured[0]
   if (route === undefined) throw new Error('route was not registered')
@@ -100,6 +112,73 @@ describe('POST /prompt-enhance/enhance (real http)', () => {
       ok: true,
       value: { text: '角色：Python 工程师。\n目标：写一个爬虫。', provider: 'zhipu', model: 'glm-5.3' },
     })
+  })
+
+  it('trims spaced provider/model from settings before the adapter call', async () => {
+    const captured: GenerateOptions[] = []
+    const capturingLlm = {
+      stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        captured.push(options)
+        return streamOf(['结果'], [{ type: 'finish', reason: { kind: 'stop' } }])
+      },
+    } as never
+    const server = mount(capturingLlm, { ...CONFIG, provider: ' zhipu ', model: ' glm ' })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { status } = await call(server, 'POST', JSON.stringify({ text: '写' }))
+      expect(status).toBe(200)
+      expect(captured[0]?.provider).toBe('zhipu')
+      expect(captured[0]?.model).toBe('glm')
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('answers 415 for a non-JSON content type', async () => {
+    const { port } = server.address() as AddressInfo
+    const response = await fetch(`http://127.0.0.1:${port}/prompt-enhance/enhance`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ text: '写' }),
+    })
+    expect(response.status).toBe(415)
+  })
+
+  it('serves a local caller that sends no Origin header', async () => {
+    // Deliberate, not a gap: a local process sending no Origin IS served. The
+    // loopback socket plus the Host allowlist are the trust boundary; Origin
+    // only defeats cross-site browser POSTs, which always carry one. Any local
+    // process is inside this route's trust model by design.
+    const server = mount(makeLlm(() => streamOf(['结果'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = server.address() as AddressInfo
+      const response = await fetch(`http://127.0.0.1:${port}/prompt-enhance/enhance`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: '写' }),
+      })
+      expect(response.status).toBe(200)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('fast-rejects an oversized Content-Length with 413 before reading', async () => {
+    const http = await import('node:http')
+    const { port } = server.address() as AddressInfo
+    const status = await new Promise<number>((resolve) => {
+      const request = http.request(
+        { host: '127.0.0.1', port, method: 'POST', path: '/prompt-enhance/enhance', headers: { 'content-type': 'application/json', 'content-length': '99999999' } },
+        (response) => {
+          response.resume()
+          resolve(response.statusCode ?? 0)
+        },
+      )
+      request.on('error', () => resolve(0))
+      request.end('x')
+    })
+    expect(status).toBe(413)
   })
 
   it('answers 404 for unknown subpaths under the prefix', async () => {
@@ -147,11 +226,11 @@ describe('POST /prompt-enhance/enhance failure mapping (real http)', () => {
     }
   })
 
-  it('maps a timeout to 504', async () => {
+  it('maps a timeout to 504', { timeout: 12000 }, async () => {
     const stall = (): AsyncIterable<StreamChunk> => ({
       [Symbol.asyncIterator]: () => ({ next: (): Promise<never> => new Promise(() => {}) }),
     })
-    const server = mount(makeLlm(stall), { ...CONFIG, timeoutMs: 300 })
+    const server = mount(makeLlm(stall), { ...CONFIG, timeoutMs: 5000 })
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     try {
       const { status, json } = await call(server, 'POST', JSON.stringify({ text: '写个脚本' }))
@@ -214,6 +293,43 @@ describe('POST /prompt-enhance/enhance disconnect handling (real sockets)', () =
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
   })
+
+  it('gives the concurrency slot back after a mid-flight disconnect', async () => {
+    // The first call stalls forever; the second answers immediately. If the
+    // disconnect failed to release the slot, the second call would 429 and
+    // every later enhancement would be locked out for the process lifetime.
+    const stall = (): AsyncIterable<StreamChunk> => ({
+      [Symbol.asyncIterator]: () => ({ next: (): Promise<never> => new Promise(() => {}) }),
+    })
+    let calls = 0
+    const server = mount({
+      stream: (): AsyncIterable<StreamChunk> => {
+        calls += 1
+        return calls === 1 ? stall() : streamOf(['结果'], [{ type: 'finish', reason: { kind: 'stop' } }])
+      },
+    } as never, { ...CONFIG, maxConcurrent: 1 })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    const net = await import('node:net')
+    const body = JSON.stringify({ text: '占用者' })
+    await new Promise<void>((resolve) => {
+      const socket = net.connect({ port, host: '127.0.0.1' }, () => {
+        socket.write(`POST /prompt-enhance/enhance HTTP/1.1\r\nHost: 127.0.0.1\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
+        setTimeout(() => {
+          socket.destroy()
+          resolve()
+        }, 120)
+      })
+      socket.on('error', () => {})
+    })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    try {
+      const later = await call(server, 'POST', JSON.stringify({ text: '后来者' }))
+      expect(later.status).toBe(200)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
 })
 
 describe('admission gate: Origin / rate / concurrency', () => {
@@ -257,7 +373,11 @@ describe('admission gate: Origin / rate / concurrency', () => {
       expect(first.status).toBe(200)
       const second = await call(server, 'POST', JSON.stringify({ text: '第二个' }))
       expect(second.status).toBe(429)
-      expect(second.json).toMatchObject({ ok: false, error: { code: 'rate' } })
+      expect(second.json).toMatchObject({ ok: false, error: { code: 'rate-limit' } })
+      // The window is bounded, so the route can name the wait exactly.
+      const retryAfter = Number(second.headers.get('retry-after'))
+      expect(retryAfter).toBeGreaterThan(0)
+      expect(retryAfter).toBeLessThanOrEqual(60)
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
@@ -280,12 +400,34 @@ describe('admission gate: Origin / rate / concurrency', () => {
       await new Promise((resolve) => setTimeout(resolve, 120))
       const second = await call(server, 'POST', JSON.stringify({ text: '后来者' }))
       expect(second.status).toBe(429)
-      expect(second.json).toMatchObject({ ok: false, error: { code: 'rate' } })
+      expect(second.json).toMatchObject({ ok: false, error: { code: 'concurrency-limit' } })
+      // A busy slot frees unpredictably, so no Retry-After is advertised.
+      expect(second.headers.get('retry-after')).toBeNull()
       release()
       const firstResult = await first
       expect(firstResult.status).toBe(200)
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
+  })
+})
+
+describe('route registration', () => {
+  it('registers one route — and one admission gate — per context', () => {
+    // A second apply on the same context must not stack a second gate: two
+    // gates would silently double the effective rate and concurrency limits.
+    const { ctx, captured } = stubContext(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    apply(ctx as never, CONFIG)
+    apply(ctx as never, CONFIG)
+    expect(captured).toHaveLength(1)
+  })
+
+  it('registers a fresh route for a different context', () => {
+    const first = stubContext(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    const second = stubContext(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    apply(first.ctx as never, CONFIG)
+    apply(second.ctx as never, CONFIG)
+    expect(first.captured).toHaveLength(1)
+    expect(second.captured).toHaveLength(1)
   })
 })

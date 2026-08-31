@@ -10,6 +10,9 @@ import z from 'schemastery'
 /** Settings namespace of the plugin section. */
 export const PROMPT_ENHANCE_NAMESPACE = 'prompt-enhance'
 
+/** How a non-empty `systemPrompt` combines with the built-in strategy. */
+export type StrategyMode = 'replace-default' | 'extend-default'
+
 /** The plugin's deployed configuration. */
 export interface Config {
   /** Master switch; off hides the composer button and disables all triggers. */
@@ -28,6 +31,14 @@ export interface Config {
   timeoutMs: number
   /** System prompt; default is the built-in enhancement strategy. */
   systemPrompt: string
+  /**
+   * How a non-empty `systemPrompt` combines with the built-in strategy.
+   * `replace-default` (the default, matching earlier versions) swaps the
+   * built-in strategy out entirely — its hard rules are NOT retained and must
+   * be carried into the custom text. `extend-default` appends the custom text
+   * after the built-in strategy, keeping those rules in force.
+   */
+  strategyMode: StrategyMode
   /** Composer keyboard shortcut, e.g. "ctrl+alt+e"; empty disables it. */
   shortcut: string
   /** Max concurrently running enhancements (host-side resource cap). */
@@ -44,6 +55,7 @@ export const DEFAULT_CONFIG: Config = {
   maxInputChars: 12000,
   timeoutMs: 60000,
   systemPrompt: '',
+  strategyMode: 'replace-default',
   shortcut: 'ctrl+alt+e',
   maxConcurrent: 2,
   rateLimitPerMinute: 10,
@@ -58,7 +70,8 @@ export const Config: z<Config> = z.object({
   maxOutputTokens: z.number().step(1).min(256).max(32768).default(DEFAULT_CONFIG.maxOutputTokens).description('单次增强的输出 token 上限'),
   maxInputChars: z.number().step(1).min(200).max(200000).default(DEFAULT_CONFIG.maxInputChars).description('输入字数上限；超限拒绝而不截断，避免改变原意'),
   timeoutMs: z.number().step(1).min(5000).max(600000).default(DEFAULT_CONFIG.timeoutMs).description('单次增强的超时（毫秒）'),
-  systemPrompt: z.string().role('textarea').default(DEFAULT_CONFIG.systemPrompt).description('系统提示词；留空使用内置增强策略，可整体替换'),
+  systemPrompt: z.string().role('textarea').default(DEFAULT_CONFIG.systemPrompt).description('系统提示词；留空使用内置增强策略'),
+  strategyMode: z.union(['replace-default', 'extend-default']).default(DEFAULT_CONFIG.strategyMode).description('自定义系统提示词的组合方式：整体替换内置策略（默认；内置策略的不编造、只输出正文等硬性约束不会自动保留），或把自定义文本追加在内置策略之后（硬性约束继续生效）'),
   shortcut: z.string().default(DEFAULT_CONFIG.shortcut).description('触发快捷键（如 ctrl+alt+e；须包含 ctrl/alt/meta 中至少一个修饰键，shift 仅可作附加，纯字母/数字或 shift+字母会被忽略；留空禁用）'),
   maxConcurrent: z.number().step(1).min(1).max(16).default(DEFAULT_CONFIG.maxConcurrent).description('宿主侧并发上限：同时进行的增强调用数，超出的请求返回 429'),
   rateLimitPerMinute: z.number().step(1).min(1).max(600).default(DEFAULT_CONFIG.rateLimitPerMinute).description('每分钟增强次数上限（滑动窗口），超出返回 429'),
@@ -107,6 +120,10 @@ export function resolveConfig(config: Config): Config {
     maxInputChars: intInRange(config.maxInputChars, 'maxInputChars', 200, 200000),
     timeoutMs: intInRange(config.timeoutMs, 'timeoutMs', 5000, 600000),
     systemPrompt: typeof config.systemPrompt === 'string' ? config.systemPrompt : '',
+    // Tolerate absent or hand-edited values: anything but the extend literal
+    // means replace, so stored sections from earlier versions keep exactly
+    // the behavior they were saved under.
+    strategyMode: config.strategyMode === 'extend-default' ? 'extend-default' : 'replace-default',
     shortcut: typeof config.shortcut === 'string' ? config.shortcut : '',
     maxConcurrent: intInRange(config.maxConcurrent, 'maxConcurrent', 1, 16),
     rateLimitPerMinute: intInRange(config.rateLimitPerMinute, 'rateLimitPerMinute', 1, 600),
@@ -114,8 +131,11 @@ export function resolveConfig(config: Config): Config {
 }
 
 /**
- * The effective system prompt: the configured override when non-empty, the
- * built-in strategy otherwise. Tolerates an absent field (older stored
+ * The effective system prompt. An empty override always means the built-in
+ * strategy. A non-empty override follows `strategyMode`: `replace-default`
+ * swaps the built-in strategy out entirely (its hard rules are not retained),
+ * while `extend-default` appends the custom text after the built-in strategy,
+ * so those rules stay in force. Tolerates an absent field (older stored
  * sections predate the schema default).
  * @param config - the resolved config.
  * @param builtin - the built-in strategy prompt.
@@ -123,5 +143,9 @@ export function resolveConfig(config: Config): Config {
  */
 export function effectiveSystemPrompt(config: Config, builtin: string): string {
   const custom = (config.systemPrompt ?? '').trim()
-  return custom !== '' ? custom : builtin
+  if (custom === '') return builtin
+  if (config.strategyMode === 'extend-default') {
+    return `${builtin}\n\nOperator additions (follow them where they do not conflict with the rules above):\n${custom}`
+  }
+  return custom
 }

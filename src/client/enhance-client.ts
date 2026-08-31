@@ -15,7 +15,15 @@ export class EnhanceClientError extends Error {
 }
 
 /** The stable error codes the host may send; anything else normalizes to `internal`. */
-const KNOWN_ERROR_CODES = new Set<EnhanceErrorCode>(['rejected', 'rate', 'timeout', 'upstream', 'unconfigured', 'internal'])
+const KNOWN_ERROR_CODES = new Set<EnhanceErrorCode>([
+  'rejected',
+  'rate-limit',
+  'concurrency-limit',
+  'timeout',
+  'upstream',
+  'unconfigured',
+  'internal',
+])
 
 /** Narrow one wire error, normalizing unknown codes. */
 function parseError(value: unknown): EnhanceError {

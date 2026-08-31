@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { checkInputText, formatInputCheckZh } from '../src/shared/validate'
+import { checkInputText, countText, formatInputCheckZh } from '../src/shared/validate'
+
+describe('countText', () => {
+  it('counts Unicode code points, not UTF-16 code units', () => {
+    expect(countText('👍')).toBe(1)
+    expect('👍'.length).toBe(2)
+    expect(countText('a👍b')).toBe(3)
+  })
+
+  it('agrees with the count the verdict reports to the user', () => {
+    const text = '👍'.repeat(3)
+    expect(checkInputText(text, 2)).toEqual({ ok: false, code: 'too-long', count: countText(text), max: 2 })
+  })
+})
 
 describe('checkInputText', () => {
   it('accepts normal text', () => {

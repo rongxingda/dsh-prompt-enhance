@@ -99,7 +99,7 @@ dsh plugin --profile web remove dsh-prompt-enhance
 1. Local guards run first: empty drafts, over-length drafts (never auto-truncated — that would change your meaning), images-only drafts, and drafts containing command or file-reference chips are refused with a clear message. Chips are rejected because filling back would destroy them.
 2. The preview panel opens with a cancellable spinner. Your draft stays untouched — the hint says so.
 3. The result phase shows both texts side by side. **Apply** fills the enhanced text back and raises the undo bar; **Copy** puts it on the clipboard; **Cancel** (or `Esc`, or clicking the overlay) discards everything.
-4. The undo bar sits above the composer: one click restores the original. If you keep typing after applying, the bar quietly retires itself so stale text can never overwrite newer edits.
+4. The undo bar sits above the composer: one click restores the original. If you keep typing after applying, the bar quietly retires itself so stale text can never overwrite newer edits. Undo entries live **only in the current page's memory** (up to 3 per session) — a page reload, a web restart, or a session switch clears them.
 
 **`/enhance <text>`** — rewrite any text from the slash menu. The result renders in the command plane (copyable) and never enters the conversation history or the model's context. To enhance the *composer draft itself*, use the button or shortcut — the draft lives in the browser. Cancelling a running `/enhance` follows the harness command plane; if the client offers no cancel affordance, the call simply runs to completion or times out.
 
@@ -117,10 +117,11 @@ Everything lives in the `prompt-enhance` settings namespace, edited from the web
 | `maxOutputTokens` | `2048` | Output token budget of one enhancement call |
 | `maxInputChars` | `12000` | Input character cap (counted in Unicode code points — an emoji is one character); over-limit drafts are **rejected, never truncated** |
 | `timeoutMs` | `60000` | End-to-end deadline of one call |
-| `systemPrompt` | built-in strategy | Replace the whole enhancement strategy if you prefer your own |
+| `systemPrompt` | built-in strategy | Custom strategy text; how it combines with the built-in strategy is set by `strategyMode` |
+| `strategyMode` | `replace-default` | How a custom strategy combines with the built-in one: `replace-default` **swaps it out entirely** (backward compatible, but the built-in hard rules — preserve intent, never fabricate, body-only output, language mirroring — are not retained and must be carried into your own text); `extend-default` **appends your text after the built-in strategy**, keeping those rules in force |
 | `shortcut` | `ctrl+alt+e` | Global shortcut spec (at least one modifier + one alphanumeric/function key — bare keys are ignored so normal typing can never be swallowed); empty disables it |
-| `maxConcurrent` | `2` | Host-side concurrency cap; extra requests answer `429` |
-| `rateLimitPerMinute` | `10` | Sliding-window rate cap per minute; extra requests answer `429` |
+| `maxConcurrent` | `2` | Concurrency cap **within a single host process**; extra requests answer `429` (`concurrency-limit`) |
+| `rateLimitPerMinute` | `10` | Sliding-window rate cap per minute, **within a single host process**; extra requests answer `429` (`rate-limit`) with a `Retry-After` in seconds |
 | `provider` + `model` values | — | Match the harness settings: each key under `llm-pi-ai.providers` (e.g. `zhipu`, `muyuu`) is a provider and each `models[].id` under it (e.g. `glm-5.3-flash`) is a model. Example pair: `provider: zhipu` + `model: glm-5.3-flash` |
 
 **Model routing precedence:** explicit settings pair → the route recorded in the current session's request header → the harness-wide default model (`agent-default-model`). If none of them names a route (e.g. a fresh session with no default model), the plugin fails with an actionable message instead of guessing.
@@ -138,7 +139,7 @@ The default system prompt instructs the model to be a prompt-rewriting expert an
 
 Hard rules: preserve intent exactly (never remove, alter, or contradict user information); never fabricate — insert an explicit placeholder like `(待补充：…)` / `(TBD: …)` for unknown details; keep the scope unchanged; output **only** the rewritten body (no explanations, fences, or pleasantries); mirror the input language; stay within roughly 1–3× the original length; lightly polish already-well-formed prompts instead of inflating them.
 
-Set `systemPrompt` in the settings to replace all of this with your own strategy.
+Set `systemPrompt` in the settings to use your own strategy; `strategyMode` decides how it combines. The default `replace-default` is a **complete replacement** — the built-in safety constraints (preserve intent, never fabricate, body-only output, mirror the input language, treat the framed draft as data) are not retained automatically, so your own strategy must include them. Switching to `extend-default` appends your text after the built-in strategy instead, keeping those rules in force.
 
 ## Error handling & edge cases
 
@@ -149,6 +150,8 @@ Set `systemPrompt` in the settings to replace all of this with your own strategy
 | Images attached but no text | Refused: text-only feature |
 | Command or file-reference chips in the draft | Refused: fill-back would destroy the chips |
 | Submitting / busy phase or a request already in flight | Refused with "try again in a moment" |
+| Per-minute cap exceeded | `429` (`rate-limit`) with a `Retry-After` in seconds; the host message names the exact wait |
+| Concurrency cap full | `429` (`concurrency-limit`), no `Retry-After` — a slot frees whenever an in-flight call settles |
 | Upstream model failure | Stable codes mapped to readable hints: `AUTH` → check API key, `RATE_LIMIT` → retry later, `QUOTA_EXCEEDED` → check balance, `CONTEXT_WINDOW_EXCEEDED` → shorten input, `NO_ADAPTER`/unconfigured → configure a model |
 | Output reaches `maxOutputTokens` | Refused with a hint to raise the cap or shorten the draft |
 | Model returns empty / fence-wrapped / tool-call output | Normalized (fences stripped) or refused; retryable |
@@ -164,8 +167,9 @@ The enhance route is served by your own dsh host and reachable **only from this 
 
 - **Socket fence** — requests from non-loopback addresses are refused (`127.0.0.1` / `::1` only). Note this means *any local process* can call the route; it carries no user authentication.
 - **Host allowlist** — the route also validates the `Host` header against `localhost` / `127.0.0.1` / `[::1]`, which defeats DNS-rebinding (a rebound attacker domain keeps the loopback socket address but carries the attacker's hostname and is refused). Responses are `cache-control: no-store`.
-- **Abuse caps** — an `Origin` gate refuses browser calls from non-local pages, and the route enforces a concurrency cap (`maxConcurrent`, default 2) and a per-minute rate limit (`rateLimitPerMinute`, default 10), answering `429` beyond either.
+- **Abuse caps** — an `Origin` gate refuses browser calls from non-local pages, and the route enforces a concurrency cap (`maxConcurrent`, default 2) and a per-minute rate limit (`rateLimitPerMinute`, default 10), answering `429` beyond either. Both counters live **in a single host process's memory**: multiple processes, a cluster, or several profiles mounting the plugin each count independently, so the global cap would be exceeded — this plugin supports single-process deployments only and ships no shared rate-limit store.
 - **Proxy rejection** — requests carrying `X-Forwarded-For` / `Forwarded` headers are refused outright: those headers only exist when a proxy is in the path, which the trust model does not cover.
+- **Request-level timeouts are the host's and Node's job** — the plugin bounds the body size (including a Content-Length fast reject) and the per-call `timeoutMs`; connection-level timeouts (headers / request timeout / keep-alive) are server-level settings on the shared `http.Server` that a prefix route must not touch, so they fall to the host and Node's defaults (60 s headers / 300 s request).
 - **Not for reverse-proxy exposure** — if you put dsh web behind a proxy that listens on the LAN, external callers appear as loopback to the route and the fence is moot. Do not expose a proxied host without adding your own authentication at the proxy.
 - **Prompt-injection boundary** — the draft is framed between `<raw_prompt>` tags, literal closing tags inside the draft are neutralized, and the strategy prompt treats the framed text as pure data. This lowers the risk of simple tag-escape; prompt-based boundaries are best-effort, not a guarantee. Enhancements run with your own credentials and the result is only ever shown back to you.
 

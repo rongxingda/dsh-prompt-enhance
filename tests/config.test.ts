@@ -35,6 +35,15 @@ describe('resolveConfig', () => {
     expect(resolved.model).toBe('glm')
   })
 
+  it('defaults an absent or malformed strategyMode to replace-default', () => {
+    expect(resolveConfig({ ...DEFAULT_CONFIG }).strategyMode).toBe('replace-default')
+    expect(resolveConfig({ ...DEFAULT_CONFIG, strategyMode: 'bogus' as never }).strategyMode).toBe('replace-default')
+  })
+
+  it('keeps an explicit extend-default', () => {
+    expect(resolveConfig({ ...DEFAULT_CONFIG, strategyMode: 'extend-default' }).strategyMode).toBe('extend-default')
+  })
+
   it('strips unknown keys left over from older versions', () => {
     const legacy = { ...DEFAULT_CONFIG, legacySetting: 'old-value' } as typeof DEFAULT_CONFIG & Record<string, unknown>
     const resolved = resolveConfig(legacy)
@@ -43,7 +52,7 @@ describe('resolveConfig', () => {
     expect(Object.keys(resolved).sort()).toEqual([
       'enabled', 'maxConcurrent', 'maxInputChars', 'maxOutputTokens', 'model',
       'provider', 'rateLimitPerMinute',
-      'shortcut', 'systemPrompt', 'temperature', 'timeoutMs',
+      'shortcut', 'strategyMode', 'systemPrompt', 'temperature', 'timeoutMs',
     ])
   })
 })
@@ -54,7 +63,17 @@ describe('effectiveSystemPrompt', () => {
     expect(effectiveSystemPrompt({ ...DEFAULT_CONFIG, systemPrompt: '  \n' }, DEFAULT_SYSTEM_PROMPT)).toBe(DEFAULT_SYSTEM_PROMPT)
   })
 
-  it('uses the configured override verbatim', () => {
+  it('uses the configured override verbatim in the default (replace) mode', () => {
     expect(effectiveSystemPrompt({ ...DEFAULT_CONFIG, systemPrompt: 'You are terse.' }, DEFAULT_SYSTEM_PROMPT)).toBe('You are terse.')
+  })
+
+  it('appends the override after the built-in strategy in extend mode', () => {
+    const prompt = effectiveSystemPrompt({ ...DEFAULT_CONFIG, systemPrompt: 'Always answer in bullet points.', strategyMode: 'extend-default' }, DEFAULT_SYSTEM_PROMPT)
+    expect(prompt.startsWith(DEFAULT_SYSTEM_PROMPT)).toBe(true)
+    expect(prompt).toContain('Always answer in bullet points.')
+  })
+
+  it('falls back to the built-in strategy when the override is blank in either mode', () => {
+    expect(effectiveSystemPrompt({ ...DEFAULT_CONFIG, strategyMode: 'extend-default' }, DEFAULT_SYSTEM_PROMPT)).toBe(DEFAULT_SYSTEM_PROMPT)
   })
 })

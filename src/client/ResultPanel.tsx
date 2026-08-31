@@ -34,7 +34,8 @@ const retryable = (code: string | undefined): boolean => code === 'upstream' || 
 function localizedErrorMessage(t: ResultPanelProps['t'], code: EnhanceError['code']): string {
   switch (code) {
     case 'rejected': return t('error.rejected')
-    case 'rate': return t('error.rate')
+    case 'rate-limit': return t('error.rateLimit')
+    case 'concurrency-limit': return t('error.concurrencyLimit')
     case 'timeout': return t('error.timeout')
     case 'unconfigured': return t('error.unconfigured')
     case 'upstream': return t('error.upstream')

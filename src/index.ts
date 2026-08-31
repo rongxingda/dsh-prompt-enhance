@@ -18,6 +18,7 @@ export const name = 'prompt-enhance'
 export const inject = ['llm', 'webServer']
 
 export { Config, DEFAULT_CONFIG, PROMPT_ENHANCE_NAMESPACE, resolveConfig } from './config'
+export type { StrategyMode } from './config'
 export { DEFAULT_SYSTEM_PROMPT, frameUserPrompt } from './prompts'
 export { enhanceText, resolveRoute, toEnhanceError } from './enhancer'
 export type { EnhanceCallOptions, LlmStreamFace, RoutePair } from './enhancer'
@@ -51,7 +52,10 @@ export function apply(ctx: Context, config: PluginConfig = { ...DEFAULT_CONFIG }
       resolveConfig(value)
     },
   })
-  const readConfig = (): PluginConfig => current()
+  // Run the raw settings through resolveConfig so the request path sees the
+  // normalized form (trimmed provider/model, stripped legacy keys, validated
+  // ranges) — the validate hook only refuses bad values, it never transforms.
+  const readConfig = (): PluginConfig => resolveConfig(current())
   registerEnhanceRoute(ctx, readConfig)
   registerEnhanceCommand(ctx, readConfig)
 }

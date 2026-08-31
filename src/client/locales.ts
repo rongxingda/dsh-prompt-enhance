@@ -27,7 +27,7 @@ export const zh = {
   'undo.undo': '撤销',
   'undo.dismiss': '关闭提示',
   'error.empty': '输入框为空，请先输入要增强的提示词。',
-  'error.tooLong': '内容共 {count} 字，超过 {max} 字上限。为避免改变原意不会自动截断，请精简后再试。',
+  'error.tooLong': '内容共 {count} 个字符，超过 {max} 个字符上限（按 Unicode 字符数统计，不是 token 数）。为避免改变原意不会自动截断，请精简后再试。',
   'error.imagesOnly': '当前只附加了图片，仅支持增强文本内容。',
   'error.occurrences': '输入内容包含命令或文件引用，暂不支持增强；请先移除后再试。',
   'error.phase': '当前输入正被占用（提交中），请稍后再试。',
@@ -37,7 +37,8 @@ export const zh = {
   'error.unconfigured': '尚未确定增强用的模型：请在插件设置中成对填写 provider/model。',
   'error.upstream': '模型服务返回错误，请重试；原输入未改动。',
   'error.internal': '增强失败，请重试；原输入未改动。',
-  'error.rate': '请求过于频繁或并发已满，请稍后再试。',
+  'error.rateLimit': '请求过于频繁，请稍后再试（等待秒数见下方详情）。',
+  'error.concurrencyLimit': '已有增强正在进行，请等其中一个完成后再试。',
 } as const
 
 /** Dictionary key union. */
@@ -66,7 +67,7 @@ export const en: Record<PromptEnhanceKey, string> = {
   'undo.undo': 'Undo',
   'undo.dismiss': 'Dismiss',
   'error.empty': 'The input box is empty — type a prompt to enhance first.',
-  'error.tooLong': 'The draft is {count} characters, above the {max} cap. It is never auto-truncated (that would change your meaning) — please shorten it.',
+  'error.tooLong': 'The draft is {count} characters, above the {max} cap (Unicode characters, not tokens). It is never auto-truncated (that would change your meaning) — please shorten it.',
   'error.imagesOnly': 'Only images are attached; prompt enhance supports text only.',
   'error.occurrences': 'The draft contains commands or file references, which are not supported yet — remove them first.',
   'error.phase': 'The input box is busy (submitting) — try again in a moment.',
@@ -76,7 +77,8 @@ export const en: Record<PromptEnhanceKey, string> = {
   'error.unconfigured': 'No model resolved for the enhancement: pair provider/model in the plugin settings.',
   'error.upstream': 'The model provider returned an error. Retry; your draft is untouched.',
   'error.internal': 'Enhancement failed. Retry; your draft is untouched.',
-  'error.rate': 'Too many requests or the concurrency cap is full — retry in a moment.',
+  'error.rateLimit': 'Too many requests — retry later (the detail line says how many seconds).',
+  'error.concurrencyLimit': 'Enhancements are already running — wait for one to finish, then retry.',
 }
 
 /** Both shipped dictionaries, keyed by locale id. */

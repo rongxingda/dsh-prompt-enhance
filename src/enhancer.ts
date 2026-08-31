@@ -39,8 +39,12 @@ export class EnhanceFailure extends Error {
  * @returns the route, or undefined when no source names one.
  */
 export function resolveRoute(explicit: Partial<RoutePair> | undefined, session: RoutePair | undefined, fallback: RoutePair | undefined): RoutePair | undefined {
-  if (explicit?.provider !== undefined && explicit.provider !== '' && explicit.model !== undefined && explicit.model !== '') {
-    return { provider: explicit.provider, model: explicit.model }
+  // Defensive trim: the explicit pair may come from a hand-edited settings
+  // document, and `readConfig` normalization is best-effort defense in depth.
+  const provider = typeof explicit?.provider === 'string' ? explicit.provider.trim() : ''
+  const model = typeof explicit?.model === 'string' ? explicit.model.trim() : ''
+  if (provider !== '' && model !== '') {
+    return { provider, model }
   }
   return session ?? fallback
 }
