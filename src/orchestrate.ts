@@ -14,9 +14,23 @@ import { EnhanceFailure, enhanceText, resolveRoute, toEnhanceError, type RoutePa
 import type { EnhanceResult } from './shared/protocol'
 import { countText } from './shared/validate'
 
-/** Structural face of the sessions store (brand types stay out of the wire path). */
+/** Structural face of one logged request header (brand types stay off the wire path). */
+interface EpochHeaderLike {
+  config?: { provider?: unknown; model?: unknown }
+}
+
+/**
+ * Structural face of the sessions store.
+ *
+ * `requestHeader` is a **method** in every dsh release checked so far —
+ * `Session.requestHeader(): EpochHeader | undefined` (0.1.1-rc.2 `lib/index.js:1497`,
+ * 0.1.2-alpha.3 `lib/index.js:1393`). Reading it as a property yields the
+ * function object, whose `.config` is `undefined`, which silently disabled this
+ * whole precedence layer. The property shape is still accepted defensively so a
+ * flip in either direction degrades to the other branch instead of a TypeError.
+ */
 interface SessionsFace {
-  get(id: string): { requestHeader?: { config?: { provider?: unknown; model?: unknown } } } | undefined
+  get(id: string): { requestHeader?: (() => EpochHeaderLike | undefined) | EpochHeaderLike } | undefined
 }
 
 /** Structural face of the settings provider for cross-namespace reads. */
@@ -39,7 +53,10 @@ function routeOf(config: { provider?: unknown; model?: unknown } | null | undefi
  */
 export function sessionRouteOf(ctx: Context, sessionId: string | undefined): RoutePair | undefined {
   if (sessionId === undefined || sessionId === '') return undefined
-  return routeOf((ctx.get('sessions') as SessionsFace | undefined)?.get(sessionId)?.requestHeader?.config)
+  const session = (ctx.get('sessions') as SessionsFace | undefined)?.get(sessionId)
+  const header = session?.requestHeader
+  const epoch = typeof header === 'function' ? header.call(session) : header
+  return routeOf(epoch?.config)
 }
 
 /** The harness-wide default model selection registered by dsh-agent-default-model. */

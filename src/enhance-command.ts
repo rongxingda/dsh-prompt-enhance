@@ -12,7 +12,7 @@ import type { CommandDefinition, CommandInvocation } from '@deepseek-ai/dsh-comm
 import { checkInputText, formatInputCheckZh } from './shared/validate'
 import { type Config } from './config'
 import { formatEnhanceError, toEnhanceError } from './enhancer'
-import { defaultRouteOf, runEnhance, sessionRouteOf } from './orchestrate'
+import { runEnhance, sessionRouteOf } from './orchestrate'
 
 /** Structural face of the commands registry (optional service). */
 interface CommandsFace {
