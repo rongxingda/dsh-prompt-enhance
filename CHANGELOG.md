@@ -2,7 +2,13 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); each release also has a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes.
 
-## Unreleased (0.1.8)
+## 0.1.9 (2026-09-01)
+
+Fix a silent no-op in the per-session route-priority layer: `Session.requestHeader` is a method on both dsh generations (`requestHeader(): EpochHeader | undefined`), not a property, but `sessionRouteOf()` read it as a field — so the lookup always saw `undefined` and fell through to the default route. The test mocks shaped it as a property, which is exactly why they passed while the real runtime path was dead. The read now probes at runtime (call it when it is a function, otherwise use the value), and `SessionsFace` reflects both shapes. The client half also dropped its leftover type-only empty imports of the removed `dsh-client-runtime` / `dsh-client-ui-conversation` client entry points, and `ClientContext` now resolves from `@deepseek-ai/cordis` directly (the `dsh-client-runtime` devDependency stays for its cordis declaration merging).
+
+Tests: 132 (method-shaped mock, method returning `undefined`, defensive property-shaped value, and a new 7-case `/enhance` command suite — empty arg, disabled, over-length, success, error mapping, missing `commands` service skip, `recordInput`).
+
+## 0.1.8 (2026-09-01)
 
 Compatibility fix found by testing the plugin on a real 0.1.2-alpha.3 harness, not by inspection: `@deepseek-ai/dsh-settings` moved its registration API — the alpha line dropped the standalone `installSettingsSection()` / `settingsNamespace()` exports and exposes the same wiring as `ctx.settings.installSection(owner, ns, …)`. Because the host half imported those names statically, the plugin failed at module load with `SyntaxError: … does not provide an export named 'installSettingsSection'`, taking the whole web profile down; 0.1.7 fixed the inject list but still crashed there.
 
