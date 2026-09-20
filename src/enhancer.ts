@@ -118,7 +118,9 @@ export async function enhanceText(llm: LlmStreamFace, options: EnhanceCallOption
       model: options.route.model,
       system: options.system,
       messages,
-      temperature: options.temperature,
+      // The Codex Responses route rejects temperature; omit it rather than
+      // failing an auxiliary rewrite that does not need sampling control.
+      ...options.route.provider === 'openai-codex' ? {} : { temperature: options.temperature },
       maxTokens: options.maxTokens,
       signal,
       ...options.sessionId !== undefined ? { sessionId: options.sessionId as GenerateOptions['sessionId'] } : {},

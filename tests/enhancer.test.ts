@@ -58,6 +58,12 @@ describe('enhanceText', () => {
     expect(llm.calls[0]?.messages[0]?.content[0]).toMatchObject({ type: 'text' })
   })
 
+  it('omits temperature for the OpenAI Codex route', async () => {
+    const llm = stubLlm(() => textStream(['enhanced'], { reason: 'stop' }))
+    await enhanceText(llm, { ...baseOptions, route: { provider: 'openai-codex', model: 'gpt-5.6-terra' } })
+    expect(llm.calls[0]?.temperature).toBeUndefined()
+  })
+
   it('strips a wrapping fence from the model output', async () => {
     const llm = stubLlm(() => textStream(['```\n角色：翻译\n```'], { reason: 'stop' }))
     const result = await enhanceText(llm, baseOptions)
