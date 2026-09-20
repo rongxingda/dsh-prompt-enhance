@@ -24,6 +24,13 @@ import { useSessionKey, serverSessionId } from './session-key'
 /** Props of the input.right entry: the InputZone owner share + session kit + locale seat. */
 export type EnhanceButtonProps = PropsRuntime<'conversation.input.right'> & PropsLocale<'prompt-enhance'>
 
+/** Input fields renamed across DSH client releases; slot props can also be partial during upgrades. */
+type CompatibleInputState = {
+  occurrences?: readonly unknown[]
+  attachmentIds?: readonly unknown[]
+  imageIds?: readonly unknown[]
+}
+
 /** One composer's enhance trigger. */
 export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const { t, sessionId, useInput, inputActions } = props
@@ -33,8 +40,11 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const wireId = serverSessionId(sessionId)
   const draft = useInput((state) => state.draft)
   const phase = useInput((state) => state.phase)
-  const occurrenceCount = useInput((state) => state.occurrences.length)
-  const imageCount = useInput((state) => state.imageIds.length)
+  const occurrenceCount = useInput((state) => (state as CompatibleInputState).occurrences?.length ?? 0)
+  const imageCount = useInput((state) => {
+    const compatible = state as CompatibleInputState
+    return compatible.attachmentIds?.length ?? compatible.imageIds?.length ?? 0
+  })
   const settings = useSyncExternalStore(subscribeClientSettings, getClientSettings)
   const panel = useSyncExternalStore(ui.subscribe, ui.getPanel)
   const rootRef = useRef<HTMLButtonElement | null>(null)

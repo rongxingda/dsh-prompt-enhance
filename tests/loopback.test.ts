@@ -39,9 +39,9 @@ describe('isTrustedRequest (DNS-rebinding fence)', () => {
     expect(isTrustedRequest(req({ host: 'internal.attacker.example' }))).toBe(false)
   })
 
-  it('refuses proxy-forwarded requests (X-Forwarded-For present)', () => {
-    expect(isTrustedRequest(req({ forwarded: true }))).toBe(false)
-    expect(isTrustedRequest(req({ forwarded: true, host: 'localhost' }))).toBe(false)
+  it('accepts loopback reverse-proxy requests with trusted Host headers', () => {
+    expect(isTrustedRequest(req({ forwarded: true }))).toBe(true)
+    expect(isTrustedRequest(req({ forwarded: true, host: 'localhost' }))).toBe(true)
   })
 
   it('refuses cross-site Origins but accepts same-app local Origins', () => {

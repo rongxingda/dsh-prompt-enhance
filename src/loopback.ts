@@ -39,20 +39,18 @@ function isTrustedOrigin(origin: string): boolean {
 }
 
 /**
- * Full trust check for the plugin's host routes: the socket must be loopback,
- * the Host header must name a loopback host, and no proxy-forwarding headers
- * may be present. The Host check defeats DNS rebinding — a rebound attacker
+ * Full trust check for the plugin's host routes: the socket must be loopback
+ * and the Host header must name a loopback host. This permits a local reverse
+ * proxy, which commonly adds `X-Forwarded-For` / `Forwarded` while preserving
+ * a loopback peer. The Host check defeats DNS rebinding — a rebound attacker
  * domain keeps the loopback socket address but carries the attacker's
  * hostname, which is refused here. A missing Host header (HTTP/1.0 style)
- * stays allowed: the socket check already bounds it to local processes.
- * Requests carrying `X-Forwarded-For` / `Forwarded` are refused outright:
- * those headers only exist when a proxy is in the path, which this route's
- * trust model does not cover. A browser-supplied `Origin` must be a same-app
- * local page — this defeats cross-site fire-and-forget POSTs, which always
- * carry an `Origin` that will not be trusted.
+ * stays allowed: the socket check already bounds it to local processes. A
+ * browser-supplied `Origin` must be a same-app local page — this defeats
+ * cross-site fire-and-forget POSTs, which always carry an Origin that will
+ * not be trusted.
  */
 export function isTrustedRequest(req: IncomingMessage): boolean {
-  if (req.headers['x-forwarded-for'] !== undefined || req.headers.forwarded !== undefined) return false
   if (!isLoopbackRequest(req)) return false
   const host = req.headers.host
   if (typeof host !== 'string' || host.trim() === '') return true
