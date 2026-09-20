@@ -146,6 +146,21 @@ describe('EnhanceButton guard chain', () => {
     fireEvent.click(enhanceButton())
     expect(screen.getByText(zh['error.occurrences'])).toBeTruthy()
   })
+
+  it('mounts when the older slot contract omits occurrences and imageIds', () => {
+    const input = makeFakeInput({ draft: '文本' })
+    input.set({ occurrences: undefined, imageIds: undefined } as never)
+    renderComposer(input, { setDraft: vi.fn() } as never, 's1')
+    expect(enhanceButton()).toBeTruthy()
+  })
+
+  it('recognizes attachmentIds from the current InputState contract', () => {
+    const input = makeFakeInput({ draft: '' })
+    input.set({ imageIds: undefined, attachmentIds: ['file1'] } as never)
+    renderComposer(input, { setDraft: vi.fn() } as never, 's1')
+    fireEvent.click(enhanceButton())
+    expect(screen.getByText(zh['error.imagesOnly'])).toBeTruthy()
+  })
 })
 
 describe('enhance → apply → undo loop', () => {
