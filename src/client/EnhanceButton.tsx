@@ -24,6 +24,27 @@ import { useSessionKey, serverSessionId } from './session-key'
 /** Props of the input.right entry: the InputZone owner share + session kit + locale seat. */
 export type EnhanceButtonProps = PropsRuntime<'conversation.input.right'> & PropsLocale<'prompt-enhance'>
 
+/**
+ * InputState field drift across host versions: 0.1.5 renamed `imageIds` to
+ * `attachmentIds`; a future host may drop or rename either array. A selector
+ * that dereferenced a missing field crashed the whole `conversation.input.
+ * right` slot entry (taking other plugins' entries down with it), so every
+ * list read goes through `compatCount`, which probes known field names and
+ * never dereferences undefined.
+ * @param state - the host's published input state (shape varies by host version).
+ * @param fields - field names to probe, in priority order.
+ * @returns the length of the first field holding an array, else 0.
+ */
+function compatCount(state: unknown, fields: readonly string[]): number {
+  const record = (state ?? null) as Record<string, unknown> | null
+  if (record === null) return 0
+  for (const field of fields) {
+    const value = record[field]
+    if (Array.isArray(value)) return value.length
+  }
+  return 0
+}
+
 /** One composer's enhance trigger. */
 export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const { t, sessionId, useInput, inputActions } = props
@@ -33,8 +54,8 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const wireId = serverSessionId(sessionId)
   const draft = useInput((state) => state.draft)
   const phase = useInput((state) => state.phase)
-  const occurrenceCount = useInput((state) => state.occurrences.length)
-  const imageCount = useInput((state) => state.imageIds.length)
+  const occurrenceCount = useInput((state) => compatCount(state, ['occurrences']))
+  const imageCount = useInput((state) => compatCount(state, ['imageIds', 'attachmentIds']))
   const settings = useSyncExternalStore(subscribeClientSettings, getClientSettings)
   const panel = useSyncExternalStore(ui.subscribe, ui.getPanel)
   const rootRef = useRef<HTMLButtonElement | null>(null)

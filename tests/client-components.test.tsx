@@ -122,6 +122,32 @@ describe('dsh 0.1.2-rc.1 dual-compat (host omits sessionId)', () => {
   })
 })
 
+describe('dsh 0.1.5 host InputState drift (imageIds → attachmentIds)', () => {
+  afterEach(cleanup)
+
+  // 0.1.5's published InputState renamed `imageIds` to `attachmentIds`; the
+  // runtime state no longer carries the legacy field. The pre-fix selector
+  // (`state.imageIds.length`) crashed the whole conversation.input.right slot
+  // entry — the ✨ button never rendered and the crash took every other entry
+  // in the slot down with it. Mirror the 0.1.5 state shape: no legacy field,
+  // attachment ids on the renamed one.
+  it('renders the button and counts attachments through the renamed field', () => {
+    const input = makeFakeInput({ draft: '' })
+    act(() => {
+      input.set({ imageIds: undefined, attachmentIds: ['att-1' as never, 'att-2' as never] } as never)
+    })
+    renderComposer(input, { setDraft: vi.fn() } as never, 's1')
+    // Pre-fix regression: the slot entry crashed and the button was absent.
+    const btn = enhanceButton()
+    expect(btn).toBeTruthy()
+    // The image-only guard still fires through the renamed field: empty
+    // draft + attachments → rejected before the host route is called.
+    fireEvent.click(btn)
+    expect(screen.getByText(zh['error.imagesOnly'])).toBeTruthy()
+    expect(requestEnhance).not.toHaveBeenCalled()
+  })
+})
+
 describe('EnhanceButton guard chain', () => {
   afterEach(cleanup)
 
