@@ -2,6 +2,18 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); releases from **0.2.3** onward also have a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes (0.2.0–0.2.2 are tagged but have no Release page — see this file for their notes).
 
+## 0.2.6 (2026-09-30)
+
+Verified on the `0.2.x` runtime — including the dsh **desktop application** at `0.2.0-rc.2`, which is the environment the plugin is actually used in day to day. No runtime behavior changes.
+
+**`dsh.engines.dsh` is now `>=0.1.1-rc.2 <0.3.0`.** 0.2.5 deliberately capped the range at `<0.2.0` because `0.2.0-rc.1` / `0.2.0-rc.2` had never been exercised. They have now been, on two hosts running `0.2.0-rc.2` — the desktop app (`D:\deepseek\DeepSeek Harness.exe`, FileVersion `0.2.0-rc.2`) and the global CLI — both completing a real enhancement against a live profile:
+
+- it is **not** listed among the bundles the new runtime refuses (`dshmarket@1.45.0`, `dsh-find-plugin@0.4.0`, and `dsh-better-sidebar@0.15.2` are skipped as peer-incompatible; this plugin passes that gate, thanks to the `>=0.1.1-rc.2` optional `@deepseek-ai/dsh-llm` peer from 0.2.4);
+- no `pending (waiting for service: …)` and no `1 entry did not activate` — the "hard-require nothing" fix from 0.2.3 holds on the new runtime too;
+- the host route answered successfully against the live model (`[prompt-enhance] … out=64 … ok`).
+
+The ceiling moves to `<0.3.0`, which covers the whole `0.2.x` line including its prereleases (`0.2.0-rc.2`, `0.2.1-rc.1`, …) while still refusing a `0.3.x` that has never been seen. Note that `dsh.engines` is advisory metadata for the loader and the plugin manager, not an enforcement gate.
+
 ## 0.2.5 (2026-09-30)
 
 Two metadata corrections; no runtime behavior changes.

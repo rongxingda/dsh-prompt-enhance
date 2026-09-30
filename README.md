@@ -52,15 +52,15 @@ The plugin is one npm package with two halves, following the dsh plugin conventi
 
 ## Requirements
 
-- `dsh >= 0.1.1-rc.2 < 0.2.0` — the range states what has actually been exercised, not an open-ended promise.
-- Boot-verified on `0.1.1-rc.2`, `0.1.2-alpha.3`, and `0.1.7-rc.2` (layer mounts, enhance route answers, client bundle builds; on alpha the plugin takes the newer `ctx.settings.installSection` registration path). The harness has broken two APIs the plugin touches: `@deepseek-ai/dsh-settings` changed its registration entry between the two early lines, and from `0.1.5-rc.3` the settings service became `SettingsForms` (no synchronous `get`) while `dsh-agent-default-model` moved the harness default model behind its own `ctx.agentDefaultModel.currentSelection()` service. The plugin probes all three shapes at runtime and adapts, no configuration needed.
-- **`0.2.x` is not verified.** The `0.2.0-rc.1` / `0.2.0-rc.2` prereleases are therefore outside the range until someone boots the plugin on them; a prerelease only matches a range that names it, so `< 0.2.0` excludes them while keeping every `0.1.x`. Widening the ceiling after a successful 0.2.x boot is a one-line change — please report what you see there.
+- `dsh >= 0.1.1-rc.2 < 0.3.0` — the range states what has actually been exercised, not an open-ended promise.
+- Boot-verified on `0.1.1-rc.2`, `0.1.2-alpha.3`, `0.1.7-rc.2`, and `0.2.0-rc.2` (layer mounts, enhance route answers, client bundle builds; on alpha the plugin takes the newer `ctx.settings.installSection` registration path, and on `0.2.0-rc.2` it also passes the runtime's plugin-compatibility gate). The `0.2.0-rc.2` checks include the **dsh desktop application** — the environment this plugin is normally used in. On a `0.2.x` runtime expect some *other* plugins to disappear from the UI: the gate skips any bundle whose `peerDependencies` pin an older `@deepseek-ai/dsh-*` range (observed: `dshmarket`, `dsh-find-plugin`, `dsh-better-sidebar`). The harness has broken two APIs the plugin touches: `@deepseek-ai/dsh-settings` changed its registration entry between the two early lines, and from `0.1.5-rc.3` the settings service became `SettingsForms` (no synchronous `get`) while `dsh-agent-default-model` moved the harness default model behind its own `ctx.agentDefaultModel.currentSelection()` service. The plugin probes all three shapes at runtime and adapts, no configuration needed.
+- The ceiling covers the whole `0.2.x` line (including its prereleases); a `0.3.x` is untested and therefore outside the range. `dsh.engines` is advisory metadata read by the loader and plugin manager — it states support, it does not enforce it.
 - Node `^22.19.0 || >=24.0.0` (for building from source)
 - Browser peers `react` / `react-dom` (`^18.2.0`) come from the web shell's module registry. The host-half module `@deepseek-ai/dsh-llm` is a **runtime module supplied by the dsh host and is not installed from npm** (the `lib/` bundles keep every package import external), so it is declared as an *optional* peer: an install that does not provide it produces no warning, and the plugin reports a normal error at enhance time rather than failing to load.
 
 | | |
 |---|---|
-| dsh | `>= 0.1.1-rc.2 < 0.2.0` |
+| dsh | `>= 0.1.1-rc.2 < 0.3.0` |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Plugin | `0.2.x` |
 
