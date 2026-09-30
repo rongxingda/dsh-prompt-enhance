@@ -11,7 +11,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
-import type { InputState } from '@deepseek-ai/dsh-client-ui-conversation'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { EnhanceButton } from '../src/client/EnhanceButton'
 import { UndoBar } from '../src/client/UndoBar'
@@ -19,6 +18,28 @@ import { requestEnhance, requestEnhanceStream } from '../src/client/enhance-clie
 import { zh } from '../src/client/locales'
 import * as ui from '../src/client/ui-state'
 import { DEFAULT_CLIENT_SETTINGS, setClientSettings } from '../src/client/settings'
+
+/**
+ * The slice of the conversation input machine this suite drives.
+ *
+ * Written out rather than imported: `InputState` lives in
+ * `dsh-client-ui-conversation/lib/types/client/input/contract.ts` and is
+ * deliberately NOT re-exported from the package root or its `./client` entry
+ * (its own doc calls that three-tier visibility intentional), so importing it
+ * from the package name is a type error — and it cannot be recovered from the
+ * slot prop either, because `SnapshotSelectorHook<T>` is itself generic in the
+ * selector's result, which erases the state type. Literal types are the honest
+ * stand-in; the props below are built as `never` and the double is exercised
+ * against the real `EnhanceButton`, so a contract drift still surfaces.
+ */
+interface InputState {
+  readonly draft: string
+  readonly imageIds: readonly unknown[]
+  readonly occurrences: readonly { readonly hint?: string }[]
+  readonly phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'
+  readonly draftRev: number
+  readonly queue: readonly unknown[]
+}
 
 vi.mock('../src/client/enhance-client', () => ({
   EnhanceClientError: class extends Error {

@@ -440,6 +440,118 @@ describe('admission gate: Origin / rate / concurrency', () => {
   })
 })
 
+describe('POST /prompt-enhance/enhance-stream (real http, SSE)', () => {
+  /**
+   * POST one draft and read the SSE body INCREMENTALLY.
+   *
+   * Incremental reading is mandatory, not stylistic: the route applies real
+   * socket backpressure, so a server frame that fills the buffer parks until
+   * the reader drains it. `response.text()` would therefore wait for a body the
+   * server is waiting for the reader to consume — the hang this helper exists
+   * to avoid. A real browser client streams the same way.
+   */
+  async function callStream(server: Server, text: string, extraHeaders: Record<string, string> = {}): Promise<{ status: number; contentType: string; body: string }> {
+    const { port } = server.address() as AddressInfo
+    const response = await fetch(`http://127.0.0.1:${port}/prompt-enhance/enhance-stream`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...extraHeaders },
+      body: JSON.stringify({ text }),
+      // Fail fast instead of eating vitest's whole 5 s budget if the stream
+      // ever stops progressing: a hang here is a route bug, not a slow test.
+      signal: AbortSignal.timeout(2000),
+    })
+    const reader = response.body?.getReader()
+    if (reader === undefined) return { status: response.status, contentType: response.headers.get('content-type') ?? '', body: '' }
+    const decoder = new TextDecoder()
+    let body = ''
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        body += decoder.decode(value, { stream: true })
+      }
+    } finally {
+      void Promise.resolve().then(() => reader.cancel()).catch(() => {})
+    }
+    return { status: response.status, contentType: response.headers.get('content-type') ?? '', body }
+  }
+
+  /** The `data:` payloads of every SSE frame, in arrival order. */
+  function framesOf(body: string): { event: string; data: unknown }[] {
+    return body
+      .split('\n\n')
+      .map((raw) => raw.trim())
+      .filter((raw) => raw !== '' && !raw.startsWith(':'))
+      .map((raw) => {
+        let event = 'message'
+        const data: string[] = []
+        for (const line of raw.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data.push(line.slice(5).trim())
+        }
+        return { event, data: JSON.parse(data.join('\n')) as unknown }
+      })
+  }
+
+  it('answers with SSE frames whose done body equals the one-shot result', async () => {
+    const server = mount(makeLlm(() => streamOf(['角色：', 'Python 工程师。'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { status, contentType, body } = await callStream(server, '写个爬虫')
+      expect(status).toBe(200)
+      expect(contentType).toContain('text/event-stream')
+      // The header-flushing comment frame is mandatory: without it the client's
+      // reader would not resume until the first model token arrived.
+      expect(body.startsWith(': open\n\n')).toBe(true)
+
+      const frames = framesOf(body)
+      const done = frames.filter((frame) => frame.event === 'done')
+      expect(done).toHaveLength(1)
+      expect(done[0]!.data).toMatchObject({
+        type: 'done',
+        value: { text: '角色：Python 工程师。', provider: 'zhipu', model: 'glm-5.3' },
+      })
+      // Deltas are display-only; the authoritative body rides the done frame.
+      expect(frames.some((frame) => frame.event === 'delta')).toBe(true)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('never shows a fence the normalized body will not have', async () => {
+    // The model wraps its answer in a code fence. The displayed deltas must not
+    // flash that fence, and the done body must carry the unwrapped text — the
+    // streaming path is display-only and cannot change what the user applies.
+    const server = mount(makeLlm(() => streamOf(['```\n角色：翻译。\n```'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { status, body } = await callStream(server, '帮我翻译')
+      expect(status).toBe(200)
+      const done = framesOf(body).find((frame) => frame.event === 'done')
+      expect(done?.data).toMatchObject({ value: { text: '角色：翻译。' } })
+      expect(body).not.toContain('```')
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('runs the same loopback fence as the one-shot route', async () => {
+    const server = mount(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = server.address() as AddressInfo
+      const response = await fetch(`http://127.0.0.1:${port}/prompt-enhance/enhance-stream`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', forwarded: 'for=1.2.3.4' },
+        body: JSON.stringify({ text: '写' }),
+      })
+      expect(response.status).toBe(403)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+})
+
 describe('route registration', () => {
   it('registers one route — and one admission gate — per context', () => {
     // A second apply on the same context must not stack a second gate: two

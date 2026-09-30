@@ -35,6 +35,17 @@ describe('resolveConfig', () => {
     expect(resolved.model).toBe('glm')
   })
 
+  it('normalizes an absent or blank pair to undefined, not to an empty override', () => {
+    // `undefined` and `''` both mean "no explicit route"; a surviving `''`
+    // would read downstream as an override that exists.
+    const absent = resolveConfig({ ...DEFAULT_CONFIG })
+    expect(absent.provider).toBeUndefined()
+    expect(absent.model).toBeUndefined()
+    const blank = resolveConfig({ ...DEFAULT_CONFIG, provider: '', model: '' })
+    expect(blank.provider).toBeUndefined()
+    expect(blank.model).toBeUndefined()
+  })
+
   it('defaults an absent or malformed strategyMode to replace-default', () => {
     expect(resolveConfig({ ...DEFAULT_CONFIG }).strategyMode).toBe('replace-default')
     expect(resolveConfig({ ...DEFAULT_CONFIG, strategyMode: 'bogus' as never }).strategyMode).toBe('replace-default')

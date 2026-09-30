@@ -213,8 +213,8 @@ export interface RunEnhanceOptions {
   sessionId?: string
   /** Pre-built context snippet; when absent it is derived from the session. */
   context?: string
-  /** Receives each text delta for incremental display (display only). */
-  onDelta?: (delta: string) => void
+  /** Receives each text delta for incremental display (display only; may be async). */
+  onDelta?: (delta: string) => void | Promise<void>
 }
 
 /**

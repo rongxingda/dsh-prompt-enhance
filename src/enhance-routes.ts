@@ -8,8 +8,9 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
-import { ENHANCE_ENDPOINT, ENHANCE_STREAM_ENDPOINT, type EnhanceStreamEvent } from './shared/protocol'
+import { ENHANCE_ENDPOINT, ENHANCE_PREFIX, ENHANCE_STREAM_ENDPOINT } from './shared/protocol'
 import { createStreamNormalizer } from './shared/stream-text'
+import { createSseWriter } from './sse'
 import { checkInputText } from './shared/validate'
 import { type Config } from './config'
 import { toEnhanceError } from './enhancer'
@@ -27,47 +28,24 @@ interface AdmissionGate {
 }
 
 /**
- * Write one SSE frame. Payloads are JSON so a newline inside the text can
- * never break the framing.
- */
-function writeEvent(res: ServerResponse, event: EnhanceStreamEvent): void {
-  res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
-}
-
-/**
- * Open the SSE response. `no-transform` and `x-accel-buffering` keep proxies
- * from buffering the stream into one blob, which would defeat the point.
- */
-function openStream(res: ServerResponse): void {
-  res.writeHead(200, {
-    'content-type': 'text/event-stream; charset=utf-8',
-    'cache-control': 'no-cache, no-transform',
-    connection: 'keep-alive',
-    'x-accel-buffering': 'no',
-  })
-  // A comment frame flushes the headers immediately so the client's reader
-  // resumes before the first model token arrives.
-  res.write(': open\n\n')
-}
-
-/**
  * Serve one enhance POST against the request envelope.
  * @param ctx - registrant context (llm, optional sessions/settings).
  * @param readConfig - per-request config reader.
+ * @param gate - per-mount admission state.
+ * @param pathname - the request path, already parsed by the prefix handler.
  * @param req - the incoming request.
  * @param res - the outgoing response.
  * @param stream - whether to answer with an SSE stream of incremental frames
  *   instead of one JSON envelope. Both modes share the whole admission path;
  *   only the response shape differs.
  */
-async function serveEnhance(ctx: Context, readConfig: () => Config, gate: AdmissionGate, req: IncomingMessage, res: ServerResponse, stream: boolean): Promise<void> {
+async function serveEnhance(ctx: Context, readConfig: () => Config, gate: AdmissionGate, pathname: string, req: IncomingMessage, res: ServerResponse, stream: boolean): Promise<void> {
   if (!isTrustedRequest(req)) {
     writeJson(res, 403, { ok: false, error: { code: 'internal', message: 'forbidden: loopback-only' } })
     return
   }
   // One route, two exact endpoints (one-shot JSON / incremental SSE):
   // anything else under the prefix is unknown.
-  const pathname = new URL(req.url ?? '/', 'http://x').pathname
   if (pathname !== ENHANCE_ENDPOINT && pathname !== ENHANCE_STREAM_ENDPOINT) {
     writeJson(res, 404, { ok: false, error: { code: 'internal', message: 'not found' } })
     return
@@ -196,20 +174,36 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
     }
     if (stream) {
       // The stream already opens before the model call, so the client sees
-      // the first token instead of waiting for the whole rewrite.
-      openStream(res)
-      // Display-only normalization: withhold a fence the final body will not
-      // have. The authoritative text still comes from `normalizeOutput` at
-      // the end, so this cannot change what the user applies.
-      const display = createStreamNormalizer()
-      const value = await runEnhance(ctx, config, {
-        ...runOptions,
-        onDelta: (delta: string): void => {
-          const safe = display.push(delta)
-          if (safe !== '' && !res.writableEnded) writeEvent(res, { type: 'delta', text: safe })
-        },
-      })
-      if (!res.writableEnded) writeEvent(res, { type: 'done', value })
+      // the first token instead of waiting for the whole rewrite. Frames go
+      // through the backpressure-aware writer: a slow reader pauses the delta
+      // path instead of letting the socket buffer grow without bound.
+      const sse = createSseWriter(res)
+      try {
+        sse.open()
+        // Display-only normalization: withhold a fence the final body will not
+        // have. The authoritative text still comes from `normalizeOutput` at
+        // the end, so this cannot change what the user applies.
+        const display = createStreamNormalizer()
+        const value = await runEnhance(ctx, config, {
+          ...runOptions,
+          onDelta: async (delta: string): Promise<void> => {
+            const safe = display.push(delta)
+            if (safe === '') return
+            await sse.write(`event: delta\ndata: ${JSON.stringify({ type: 'delta', text: safe })}\n\n`)
+          },
+        })
+        // End the display stream: release whatever the fence heuristic was
+        // still withholding, so the incremental view shows the same text the
+        // done frame is about to carry (the model may end inside a fence).
+        const tail = display.finish()
+        if (tail !== '') {
+          await sse.write(`event: delta\ndata: ${JSON.stringify({ type: 'delta', text: tail })}\n\n`)
+        }
+        await sse.write(`event: done\ndata: ${JSON.stringify({ type: 'done', value })}\n\n`)
+      } finally {
+        // Always release the transport listener, success or failure.
+        sse.dispose()
+      }
     } else {
       const value = await runEnhance(ctx, config, runOptions)
       writeJson(res, 200, { ok: true, value })
@@ -222,7 +216,7 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
     const wire = toEnhanceError(error)
     if (stream && res.headersSent) {
       // Headers are already out: the failure has to ride the same stream.
-      if (!res.writableEnded) writeEvent(res, { type: 'error', error: wire })
+      if (!res.writableEnded) res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: wire })}\n\n`)
     } else {
       writeJson(res, wire.code === 'timeout' ? 504 : wire.code === 'unconfigured' ? 409 : 502, { ok: false, error: wire })
     }
@@ -256,10 +250,10 @@ export function registerEnhanceRoute(ctx: Context, readConfig: () => Config): vo
   const gate: AdmissionGate = { stamps: [], active: 0 }
   webserver.register({
     kind: 'prefix',
-    path: ENHANCE_ENDPOINT.replace(/\/enhance$/, ''),
+    path: ENHANCE_PREFIX,
     handler: (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       const pathname = new URL(req.url ?? '/', 'http://x').pathname
-      return serveEnhance(ctx, readConfig, gate, req, res, pathname === ENHANCE_STREAM_ENDPOINT)
+      return serveEnhance(ctx, readConfig, gate, pathname, req, res, pathname === ENHANCE_STREAM_ENDPOINT)
     },
   })
 }

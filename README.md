@@ -222,10 +222,14 @@ src/
 ├── prompts.ts          built-in strategy system prompt + <raw_prompt> framing
 ├── enhancer.ts         the ctx.llm auxiliary call (route resolution, deadline
 │                       racing, finish validation, structured errors + host render)
-├── enhance-routes.ts   POST /prompt-enhance/enhance (loopback fence, body cap)
+├── enhance-routes.ts   POST /prompt-enhance/enhance + /enhance-stream (loopback
+│                       fence, body cap, admission gate)
 ├── enhance-command.ts  /enhance slash command (host command registry)
+├── orchestrate.ts      shared route resolution + context assembly for both entries
+├── context.ts          bounded, neutralized <conversation_context> snippet
 ├── loopback.ts         127.0.0.1/::1 fence for the route
 ├── http.ts             bounded JSON body reader / writer
+├── sse.ts              backpressure-aware SSE frame writer
 ├── shared/             wire protocol types, input checks, output normalization
 │                       (imported by both halves)
 └── client/             browser half
@@ -234,8 +238,9 @@ src/
     ├── ResultPanel     overlay panel: compare / apply / copy / cancel / retry
     ├── UndoBar         conversation.input.dock entry: restore affordance
     ├── ui-state.ts     external store shared by components (panel, undo, sessions)
-    ├── enhance-client  fetch client with abort + typed errors
+    ├── enhance-client  fetch client with abort + typed errors (SSE + one-shot)
     ├── undo-stack.ts   per-session LIFO (depth 3, global cap 60, LRU eviction)
+    ├── session-key.ts  per-composer UI key (host sessionId, else stable fallback)
     ├── shortcut.ts     pure combo parsing / matching
     ├── settings.ts     client mirror of the settings namespace
     ├── locales.ts      zh + en dictionaries (harness locale namespace)

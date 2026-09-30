@@ -67,11 +67,12 @@ export interface EnhanceCallOptions {
   /** The framed conversation-context snippet, when the call carries one. */
   context?: string
   /**
-   * Receives each text delta as the model produces it (display only). A throw
-   * from this callback is swallowed — a broken display path must never fail
+   * Receives each text delta as the model produces it (display only). May be
+   * async — the streaming route's sink awaits socket backpressure. A throw, or
+   * a rejected promise, is swallowed: a broken display path must never fail
    * the enhancement itself.
    */
-  onDelta?: (delta: string) => void
+  onDelta?: (delta: string) => void | Promise<void>
 }
 
 /**
@@ -152,7 +153,10 @@ export async function enhanceText(llm: LlmStreamFace, options: EnhanceCallOption
         // the final normalization.
         if (next.value.type === 'text-delta' && options.onDelta !== undefined) {
           try {
-            options.onDelta(next.value.text)
+            // The sink may be async (the SSE route awaits socket drain), so a
+            // rejected promise is attached here too — an unhandled rejection
+            // from a display-only path must not surface as a process warning.
+            void Promise.resolve(options.onDelta(next.value.text)).catch(() => {})
           } catch {
             // Never let a broken display path fail the enhancement.
           }

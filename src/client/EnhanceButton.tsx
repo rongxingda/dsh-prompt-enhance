@@ -46,16 +46,22 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   // that cap protects the /enhance command plane and multi-client callers,
   // while the single-panel UI cannot show two loading states anyway.
   const anyBusy = panel !== undefined && panel.phase === 'loading'
+  // The OTHER composer is the one loading. See the button render below: a
+  // cross-session busy state used to disable this button with no explanation,
+  // which reads as "broken" in a multi-session layout.
+  const otherBusy = anyBusy && !busy
 
   /** Guard chain + fetch + panel transition for this session. */
   const start = useCallback((): void => {
     if (anyBusy) return
     if (!settings.enabled) {
-      ui.openError(uiKey, draft, { code: 'rejected', message: t('error.disabled'), localized: t('error.disabled') })
+      const disabled = t('error.disabled')
+      ui.openError(uiKey, draft, { code: 'rejected', localized: disabled })
       return
     }
     if (imageCount > 0 && draft.trim() === '') {
-      ui.openError(uiKey, draft, { code: 'rejected', message: t('error.imagesOnly'), localized: t('error.imagesOnly') })
+      const imagesOnly = t('error.imagesOnly')
+      ui.openError(uiKey, draft, { code: 'rejected', localized: imagesOnly })
       return
     }
     const check = checkInputText(draft, settings.maxInputChars)
@@ -63,15 +69,17 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
       const message = check.code === 'empty'
         ? t('error.empty')
         : t('error.tooLong', { count: check.count, max: check.max })
-      ui.openError(uiKey, draft, { code: 'rejected', message, localized: message })
+      ui.openError(uiKey, draft, { code: 'rejected', localized: message })
       return
     }
     if (occurrenceCount > 0) {
-      ui.openError(uiKey, draft, { code: 'rejected', message: t('error.occurrences'), localized: t('error.occurrences') })
+      const occurrences = t('error.occurrences')
+      ui.openError(uiKey, draft, { code: 'rejected', localized: occurrences })
       return
     }
     if (phase !== 'plain') {
-      ui.openError(uiKey, draft, { code: 'rejected', message: t('error.phase'), localized: t('error.phase') })
+      const busyPhase = t('error.phase')
+      ui.openError(uiKey, draft, { code: 'rejected', localized: busyPhase })
       return
     }
     const controller = new AbortController()
@@ -139,9 +147,14 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
         ref={rootRef}
         type="button"
         className={`dsh-pe-btn${busy ? ' is-busy' : ''}`}
-        title={busy ? t('button.busy') : t('button.title')}
-        aria-label={t('button.title')}
-        disabled={anyBusy && !busy}
+        title={busy ? t('button.busy') : otherBusy ? t('button.otherBusy') : t('button.title')}
+        aria-label={otherBusy ? t('button.otherBusy') : t('button.title')}
+        // `aria-disabled` instead of `disabled`: a disabled button is skipped by
+        // the keyboard and by screen readers, so the reason this composer is
+        // inert (another session's enhancement occupies the single preview
+        // panel) would be unreachable exactly for the users who need it. The
+        // click is a no-op either way (`start` returns early on `anyBusy`).
+        aria-disabled={otherBusy || undefined}
         onClick={start}
       >
         <span className="dsh-pe-btn-icon" aria-hidden>{busy ? '◌' : '✨'}</span>

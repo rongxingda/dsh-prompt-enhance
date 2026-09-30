@@ -9,6 +9,14 @@
 export const ENHANCE_ENDPOINT = '/prompt-enhance/enhance'
 
 /**
+ * Mount prefix of the plugin's host routes. The webserver registration uses it
+ * verbatim; it used to be derived from {@link ENHANCE_ENDPOINT} with a
+ * `replace(/\/enhance$/, '')`, which would silently mount the WRONG path the
+ * day the endpoint constant is renamed.
+ */
+export const ENHANCE_PREFIX = '/prompt-enhance'
+
+/**
  * Host route path of the incremental variant: same request body, but the
  * response is an SSE stream of {@link EnhanceStreamEvent} frames so the panel
  * can show the rewrite while it is being written.

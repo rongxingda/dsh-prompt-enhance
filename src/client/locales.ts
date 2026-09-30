@@ -8,6 +8,7 @@
 export const zh = {
   'button.title': '提示词增强（重写为结构化提示词）',
   'button.busy': '正在增强…',
+  'button.otherBusy': '另一个会话正在增强中；请等它完成或先关闭其结果面板。',
   'panel.title': '提示词增强',
   'panel.loading': '正在增强，稍候…',
   'panel.streaming': '正在生成（边写边显示）…',
@@ -57,6 +58,7 @@ export type PromptEnhanceKey = keyof typeof zh
 export const en: Record<PromptEnhanceKey, string> = {
   'button.title': 'Enhance prompt (rewrite into a structured prompt)',
   'button.busy': 'Enhancing…',
+  'button.otherBusy': 'Another session is enhancing right now — wait for it, or close its result panel first.',
   'panel.title': 'Prompt Enhance',
   'panel.loading': 'Enhancing, please wait…',
   'panel.streaming': 'Generating (shown as it is written)…',

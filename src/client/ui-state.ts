@@ -137,10 +137,24 @@ export function getPanel(): PanelState | undefined {
   return panelState
 }
 
+/**
+ * Abort one in-flight panel request without letting its teardown failure
+ * block the transition. The panel is replaced either way: an abort callback
+ * that throws must not leave the store half-mutated, or the button inert.
+ * @param state - the panel being replaced/closed, when one is open.
+ */
+function abortOf(state: PanelState | undefined): void {
+  try {
+    state?.abort?.()
+  } catch {
+    // A dead fetch/stream is already cancelled; nothing left to do.
+  }
+}
+
 /** Open (or replace) the panel in the loading phase. Any in-flight request
  * from the replaced panel is aborted first, so it cannot become an orphan. */
 export function openLoading(state: Omit<PanelState, 'phase' | 'result' | 'error'>): void {
-  panelState?.abort?.()
+  abortOf(panelState)
   panelState = { ...state, phase: 'loading' }
   notify()
 }
@@ -177,7 +191,7 @@ export function appendDelta(sessionId: string, text: string): void {
 
 /** Open the panel directly in the error phase (local validation failures). */
 export function openError(sessionId: string, original: string, error: EnhanceError): void {
-  panelState?.abort?.()
+  abortOf(panelState)
   panelState = { sessionId, phase: 'error', original, error }
   notify()
 }
@@ -195,7 +209,7 @@ export function setStale(sessionId: string, stale: boolean): void {
 
 /** Close the panel (cancel/dismiss/apply); aborts an in-flight request. */
 export function closePanel(): void {
-  panelState?.abort?.()
+  abortOf(panelState)
   if (panelState === undefined) return
   panelState = undefined
   notify()

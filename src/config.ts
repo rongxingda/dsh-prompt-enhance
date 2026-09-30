@@ -130,6 +130,14 @@ export function resolveConfig(config: Config): Config {
   if (typeof temperature !== 'number' || !Number.isFinite(temperature) || temperature < 0 || temperature > 1) {
     throw new Error('prompt-enhance: temperature 必须是 0–1 之间的有限数字')
   }
+  // Whitespace-only is "absent", not "set": the explicit pair is definitionally
+  // non-empty, so a blank override strips away as `undefined` rather than
+  // surviving as `''` and reading as "an override exists" downstream.
+  const pairOrUndefined = (value: string | undefined): string | undefined => {
+    if (value === undefined) return undefined
+    const trimmed = value.trim()
+    return trimmed === '' ? undefined : trimmed
+  }
   const intInRange = (value: unknown, name: string, min: number, max: number): number => {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
       throw new Error(`prompt-enhance: ${name} 必须是 ${min}–${max} 之间的整数`)
@@ -138,8 +146,8 @@ export function resolveConfig(config: Config): Config {
   }
   return {
     enabled: config.enabled,
-    provider,
-    model,
+    provider: pairOrUndefined(provider),
+    model: pairOrUndefined(model),
     temperature,
     maxOutputTokens: intInRange(config.maxOutputTokens, 'maxOutputTokens', 256, 32768),
     maxInputChars: intInRange(config.maxInputChars, 'maxInputChars', 200, 200000),

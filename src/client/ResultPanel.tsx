@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EnhanceError } from '../shared/protocol'
-import { zh, type PromptEnhanceKey } from './locales'
+import type { PromptEnhanceKey } from './locales'
 import type { PanelState } from './ui-state'
 
 /** Props of the preview panel. */
@@ -28,6 +28,31 @@ export interface ResultPanelProps {
 const retryable = (code: string | undefined): boolean => code === 'upstream' || code === 'timeout' || code === 'internal'
 
 /**
+ * Wire `reason` (`UpstreamReason`, kebab-case as the host sends it) → the
+ * dictionary key that carries its fix hint.
+ *
+ * This is an EXPLICIT table on purpose. The dictionary keys are camelCase
+ * (`error.upstream.invalidCredential`) while the wire reasons are kebab-case
+ * (`invalid-credential`), so building the key as
+ * `` `error.upstream.${reason}` `` silently missed every multi-word reason
+ * (`invalid-credential`, `rate-limit`, `context-window`, `tool-call`,
+ * `max-tokens` — five of the eight) and always fell back to the generic
+ * `error.upstream` copy. Spelling the mapping out keeps the two vocabularies
+ * in one place: every entry is a literal key checked by `PromptEnhanceKey`,
+ * and `tests/locales.test.ts` asserts each one exists in every dictionary.
+ */
+export const UPSTREAM_ERROR_KEYS: Record<string, PromptEnhanceKey> = {
+  auth: 'error.upstream.auth',
+  'invalid-credential': 'error.upstream.invalidCredential',
+  'rate-limit': 'error.upstream.rateLimit',
+  quota: 'error.upstream.quota',
+  empty: 'error.upstream.empty',
+  'context-window': 'error.upstream.contextWindow',
+  'tool-call': 'error.upstream.toolCall',
+  'max-tokens': 'error.upstream.maxTokens',
+}
+
+/**
  * Primary line for a server-side error, localized by the stable code and its
  * structured params: an upstream `reason` picks a specific fix hint when one
  * exists, and an over-length rejection reuses the too-long input message the
@@ -43,8 +68,8 @@ function localizedErrorMessage(
     return t('error.tooLong', { count: params.count, max: params.max })
   }
   if (code === 'upstream' && typeof params?.reason === 'string') {
-    const specific = `error.upstream.${params.reason}` as PromptEnhanceKey
-    if (specific in zh) return t(specific)
+    const specific = UPSTREAM_ERROR_KEYS[params.reason]
+    if (specific !== undefined) return t(specific)
   }
   switch (code) {
     case 'rejected': return t('error.rejected')
@@ -115,11 +140,28 @@ export function ResultPanel(props: ResultPanelProps): ReactNode {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [onCancel])
 
-  // Move focus into the dialog on open; hand it back to the opener on close.
+  // The element that owned focus when the panel opened, captured at mount.
+  const openerRef = useRef<HTMLElement | null>(null)
+
+  // Move focus into the dialog on open. The restore lives in the SAME effect
+  // (not in a second mount-only effect): under React 18 StrictMode the mount
+  // effect runs → cleans up → runs again, and a restore that keyed off a
+  // second effect's mount-time `document.activeElement` would read the panel
+  // itself and hand focus straight back out, neutering the Tab trap and the
+  // Escape handler below.
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     panelRef.current?.focus()
-    return () => previous?.focus()
+    return () => {
+      const opener = openerRef.current
+      openerRef.current = null
+      // Hand focus back to the opener, but never steal it from wherever the
+      // user has since moved it (the document body means focus was dropped,
+      // not moved on purpose).
+      if (opener === null || !opener.isConnected) return
+      const active = document.activeElement
+      if (active === null || active === document.body) opener.focus()
+    }
   }, [])
 
   const copy = useCallback((): void => {

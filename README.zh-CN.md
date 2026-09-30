@@ -222,10 +222,14 @@ src/
 ├── prompts.ts          内置策略系统提示词 + <raw_prompt> 框架
 ├── enhancer.ts         ctx.llm 辅助调用(路由解析、超时竞速、finish 校验、
 │                       结构化错误 code+params + 宿主侧渲染)
-├── enhance-routes.ts   POST /prompt-enhance/enhance(回环栅栏、限长)
+├── enhance-routes.ts   POST /prompt-enhance/enhance 与 /enhance-stream(回环栅栏、
+│                       限长、准入闸门)
 ├── enhance-command.ts  /enhance 斜杠命令(宿主命令注册表)
+├── orchestrate.ts      两条宿主入口共用的路由解析 + 上下文装配
+├── context.ts          有界、去框架化的 <conversation_context> 片段
 ├── loopback.ts         路由的 127.0.0.1/::1 栅栏
 ├── http.ts             限长 JSON body 读取 / 写出
+├── sse.ts              带背压的 SSE 帧写入器
 ├── shared/             传输协议类型、输入校验、输出规范化(两端共用)
 └── client/             浏览器半区
     ├── index.tsx       插槽注册 + 设置镜像 + 快捷键监听
@@ -233,8 +237,9 @@ src/
     ├── ResultPanel     浮层面板:对比 / 回填 / 复制 / 取消 / 重试
     ├── UndoBar         conversation.input.dock 条目:恢复入口
     ├── ui-state.ts     组件共享的外部 store(面板、撤销、会话注册表)
-    ├── enhance-client  fetch 客户端(可中止 + 类型化错误)
+    ├── enhance-client  fetch 客户端(可中止 + 类型化错误;SSE 与一次性两条路径)
     ├── undo-stack.ts   按会话的 LIFO 栈(每会话深度 3,全局 60 条,LRU 淘汰)
+    ├── session-key.ts  每个输入框的 UI key(宿主 sessionId,否则稳定兜底 id)
     ├── shortcut.ts     纯函数的组合键解析 / 匹配
     ├── settings.ts     设置命名空间的客户端镜像
     ├── locales.ts      中英文字典(harness locale 命名空间)

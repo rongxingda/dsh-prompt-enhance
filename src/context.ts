@@ -13,6 +13,8 @@
  * @module dsh-prompt-enhance/context
  */
 
+import { countText } from './shared/validate'
+
 /** One turn of conversation history admitted into the context window. */
 export interface ContextTurn {
   /** Speaker role; `system` is never part of the window. */
@@ -37,6 +39,27 @@ interface HistoryMessageLike {
 
 /** Marker appended to a turn that was cut to fit the character budget. */
 const TRUNCATION_MARK = '…（已截断）'
+
+/**
+ * Cut one text to at most `max` Unicode code points. Slicing by UTF-16 index
+ * could split a surrogate pair (an emoji, a rare CJK ext-B glyph) and leave a
+ * lone surrogate — invalid text the model cannot read back.
+ * @param text - the text to cut.
+ * @param max - the code-point budget; non-positive yields the empty string.
+ * @returns the longest prefix of at most `max` code points.
+ */
+function cutToCodePoints(text: string, max: number): string {
+  if (max <= 0) return ''
+  if (text.length <= max) return text
+  let out = ''
+  let n = 0
+  for (const ch of text) {
+    if (n === max) break
+    out += ch
+    n++
+  }
+  return out
+}
 
 /**
  * The literal prose of one derived message. Only text blocks count: tool
@@ -107,17 +130,22 @@ export function selectTurns(messages: readonly unknown[], options: ContextWindow
   let used = 0
   for (let index = windowed.length - 1; index >= 0; index--) {
     const turn = windowed[index]!
-    if (used + turn.text.length > maxChars) {
+    // Same gauge as `shared/validate.countText`, the input cap, and the host
+    // logs: Unicode code points, not UTF-16 units. `turn.text.length` would
+    // spend double budget on CJK/emoji-heavy history and make `maxChars`
+    // disagree with the "characters" the UI reports.
+    const length = countText(turn.text)
+    if (used + length > maxChars) {
       const room = maxChars - used
       // One very long recent turn must not blank the window: keep its head,
       // marked as cut. The head is what names the task, the stack, and the
       // constraints the draft is shorthand for.
       if (kept.length === 0 && room > TRUNCATION_MARK.length + 40) {
-        kept.unshift({ role: turn.role, text: `${turn.text.slice(0, room - TRUNCATION_MARK.length).trimEnd()}${TRUNCATION_MARK}` })
+        kept.unshift({ role: turn.role, text: `${cutToCodePoints(turn.text, room - TRUNCATION_MARK.length).trimEnd()}${TRUNCATION_MARK}` })
       }
       break
     }
-    used += turn.text.length
+    used += length
     kept.unshift(turn)
   }
   return kept

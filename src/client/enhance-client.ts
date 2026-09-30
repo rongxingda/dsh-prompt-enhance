@@ -14,6 +14,20 @@ export class EnhanceClientError extends Error {
   }
 }
 
+/**
+ * Encode one request body.
+ *
+ * UTF-8 bytes rather than a bare string: with `types: ["node"]` the `BodyInit`
+ * union has no `string` member (the DOM-only `string` form relies on the
+ * global fetch types), and the explicit encoder also makes the wire size of a
+ * CJK-heavy draft statable instead of implicit.
+ * @param body - the typed request envelope.
+ * @returns the UTF-8 encoded JSON payload.
+ */
+function jsonBody(body: EnhanceRequestBody): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(body))
+}
+
 /** The stable error codes the host may send; anything else normalizes to `internal`. */
 const KNOWN_ERROR_CODES = new Set<EnhanceErrorCode>([
   'rejected',
@@ -140,9 +154,9 @@ export async function requestEnhanceStream(body: EnhanceRequestBody, options: En
     response = await fetch(ENHANCE_STREAM_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
-      body: JSON.stringify(body),
+      body: jsonBody(body),
       signal: options.signal,
-    })
+    } as RequestInit)
   } catch (error) {
     if (options.signal?.aborted) {
       throw new EnhanceClientError({ code: 'internal', message: '已取消增强；原输入未改动。' })
@@ -156,7 +170,9 @@ export async function requestEnhanceStream(body: EnhanceRequestBody, options: En
   if (stream === null || stream === undefined || !streamable) {
     // Not a stream (old host, buffered proxy, or a rejection that predates
     // the stream): release the body and take the one-shot path instead.
-    void stream?.cancel?.().catch(() => {})
+    // `cancel()` may return a promise in some runtimes and undefined in
+    // others, so wrap before catching rather than assuming a promise.
+    void Promise.resolve().then(() => stream?.cancel()).catch(() => {})
     return requestEnhance(body, options.signal)
   }
   const reader = stream.getReader()
@@ -178,7 +194,7 @@ export async function requestEnhanceStream(body: EnhanceRequestBody, options: En
       }
     }
   } finally {
-    void reader.cancel().catch(() => {})
+    void Promise.resolve().then(() => reader.cancel()).catch(() => {})
   }
   throw new EnhanceClientError({ code: 'internal', message: '宿主服务提前关闭了增强流，请重试；原输入未改动。' })
 }
@@ -196,9 +212,9 @@ export async function requestEnhance(body: EnhanceRequestBody, signal?: AbortSig
     response = await fetch(ENHANCE_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: jsonBody(body),
       signal,
-    })
+    } as RequestInit)
   } catch (error) {
     if (signal?.aborted) {
       throw new EnhanceClientError({ code: 'internal', message: '已取消增强；原输入未改动。' })
