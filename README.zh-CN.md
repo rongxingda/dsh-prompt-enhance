@@ -55,6 +55,7 @@ flowchart LR
 - `dsh >= 0.1.1-rc.2`
 - 实测环境:`0.1.1-rc.2`、`0.1.2-alpha.3`、`0.1.7-rc.2` 均已 boot 验证(插件层挂载、增强路由应答、客户端 bundle 构建通过;alpha 上走新版 `ctx.settings.installSection` 注册路径)。宿主在插件用到的两处 API 上做过破坏性变更:`@deepseek-ai/dsh-settings` 的注册入口在两条早期版本线之间变了;`0.1.5-rc.3` 起 settings 服务改为 `SettingsForms`(不再有同步 `get`),同时 `dsh-agent-default-model` 把全局默认模型收进了自己的 `ctx.agentDefaultModel.currentSelection()` 服务。插件对三种形态均做运行时探测并自动适配,无需配置。
 - Node `^22.19.0 || >=24.0.0`(仅从源码构建时需要)
+- 浏览器侧 peer `react` / `react-dom`(`^18.2.0`)由 Web 壳的模块注册表提供。宿主半区用到的 `@deepseek-ai/dsh-llm` 是**由 dsh 宿主提供的运行时模块,不从 npm 安装**(`lib/` 产物把包引用全部保持为外部),因此声明为**可选** peer:未提供它的环境不会出现安装警告,增强时按正常错误路径报错,而不是加载失败。
 
 | | |
 |---|---|

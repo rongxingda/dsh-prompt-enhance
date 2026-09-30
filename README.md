@@ -55,6 +55,7 @@ The plugin is one npm package with two halves, following the dsh plugin conventi
 - `dsh >= 0.1.1-rc.2`
 - Boot-verified on `0.1.1-rc.2`, `0.1.2-alpha.3`, and `0.1.7-rc.2` (layer mounts, enhance route answers, client bundle builds; on alpha the plugin takes the newer `ctx.settings.installSection` registration path). The harness has broken two APIs the plugin touches: `@deepseek-ai/dsh-settings` changed its registration entry between the two early lines, and from `0.1.5-rc.3` the settings service became `SettingsForms` (no synchronous `get`) while `dsh-agent-default-model` moved the harness default model behind its own `ctx.agentDefaultModel.currentSelection()` service. The plugin probes all three shapes at runtime and adapts, no configuration needed.
 - Node `^22.19.0 || >=24.0.0` (for building from source)
+- Browser peers `react` / `react-dom` (`^18.2.0`) come from the web shell's module registry. The host-half module `@deepseek-ai/dsh-llm` is a **runtime module supplied by the dsh host and is not installed from npm** (the `lib/` bundles keep every package import external), so it is declared as an *optional* peer: an install that does not provide it produces no warning, and the plugin reports a normal error at enhance time rather than failing to load.
 
 | | |
 |---|---|

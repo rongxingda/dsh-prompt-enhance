@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); each release also has a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes.
 
+## 0.2.4 (2026-09-30)
+
+Packaging-only follow-up to 0.2.3; no runtime behavior changes.
+
+**`@deepseek-ai/dsh-llm` is now an optional peer with a satisfiable range.** 0.2.3 declared it as `^0.1.1-rc.2`, which no published version can satisfy — the registry serves `0.0.1-rc.1`, one minor below the range — so every install produced a peer warning that could not be resolved, and npm could offer to pull a version whose API does not match. The module is in fact a **runtime module supplied by the dsh host**: both `lib/` bundles keep every package import external and the loader satisfies it in-process, so it is not installable from npm by design. The range is now the honest floor (`>=0.1.1-rc.2`, matching the `dsh.engines.dsh` floor) and the entry is marked `optional` in `peerDependenciesMeta`; the react / react-dom peers stay required. Both READMEs' Requirements sections state where the module comes from.
+
 ## 0.2.3 (2026-09-30)
 
 Four real defects fixed — two of them long-standing, two surfaced only by running the plugin against a live `dsh web` host. Patch release: no feature, config, or API additions, and no behavior change on a host that already worked.
