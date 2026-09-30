@@ -160,3 +160,52 @@ src/
 ## 六、安装形态提醒
 
 当前 profile 通过 `link:` 指向本仓库，**宿主半改动必须重启 `dsh web`**；且 profile 的 `package.json` 里若残留 `^0.2.x` 语义版本声明，任何一次 `npm install` 都可能把 `link:` 覆盖回 npm 上的版本，从而静默丢掉本地修复。
+
+---
+
+## 七、发布记录（本次交付闭环）
+
+审阅修复经多轮提交交付，并已发布到 npm 与 GitHub。
+
+### 版本演进
+
+| 版本 | 内容 | 状态 |
+|---|---|---|
+| `0.2.1` / `0.2.2` | 审阅前已发布（**不含本次任何修复**） | 已被 0.2.4 取代 |
+| `0.2.3` | 四个缺陷修复（locale 映射、SSE 未结束、启动崩溃、渲染崩溃）+ 打包面补全 | 已发布，GitHub **Latest** |
+| `0.2.4` | 仅打包修正：`@deepseek-ai/dsh-llm` 改为可满足范围的 optional peer | 已发布，npm **latest** / GitHub **Pre-release** |
+
+### commit 批次
+
+| 顺序 | 主题 |
+|---|---|
+| 1 | `fix: locale reason mapping, package peer surface, SSE backpressure` |
+| 2 | `fix: end the SSE response so the streamed route terminates` |
+| 3 | `fix(client): never hard-require optional services so boot cannot fail` |
+| 4 | `fix(client): tolerate host input states without imageIds/occurrences` |
+| 5 | `docs: finalize code review report` |
+| 6 | `docs: add 0.2.3 changelog entry`，随后 `npm version patch` 产出 0.2.3 的版本提交与 `v0.2.3` 标签 |
+| 7 | `fix: make the dsh-llm peer optional and satisfiable`，随后 `npm version patch` 产出 0.2.4 的版本提交与 `v0.2.4` 标签 |
+| 8 | `docs: add release notes for 0.2.3 and 0.2.4` |
+
+精确 hash 以 `git log --oneline` 为准；此处刻意不写 hash，避免记录随 rebase/amend 失真。
+
+### 发布验证
+
+| 检查 | 结果 |
+|---|---|
+| `npm view dsh-prompt-enhance dist-tags --json` | `latest` = **`0.2.4`** |
+| `gh release list` | `v0.2.3` = **Latest**；`v0.2.4` = **Pre-release** |
+| GitHub 远端 | `main` 已推送（以 `git log origin/main -1` 为准） |
+| `npm pack` | 37 个文件（0.2.3/0.2.4 发布时），含 `lib/`、`cordis.patch.yml`、两份 README、`docs/`、`src/` |
+| `prepublishOnly` 闸门 | `npm run build && npm test` 各执行一次，207 用例通过后才上传 |
+
+### 过程中的两个教训
+
+1. **npm 版本号不可覆盖。** 首次 `npm publish` 因「已发布 0.2.2」被拒——这不是权限问题（`npm whoami` 全程为 `rongxingda`），而是 npm 的版本号一次性语义。正确反应是升版本号（`npm version patch`），而非排查权限。任何"改完直接重发同号"的期望都不成立。
+2. **`npm view` 的即时读数是旧快照。** 发布成功后立刻查 `dist-tags` 仍返回 0.2.2，属于 registry 复制延迟；判断发布是否成功应以 `npm publish` 自身的 `+ <pkg>@<version>` 输出为准，稍后再查 dist-tags 复核。
+
+### 已知遗留（未处理，供后续决策）
+
+- `v0.2.0`–`v0.2.2` **有标签但无 GitHub Release 页**；CHANGELOG 的口径已相应限定为「自 0.2.3 起」，因此文档与实际一致，无需补建。
+- `files` 含 `"docs"`，因此 Release 正文等文档会随后续版本进入 npm 包（每个约几 KB，不影响功能）。
