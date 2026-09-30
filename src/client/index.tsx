@@ -24,20 +24,39 @@ import { decodeClientSettings, getClientSettings, setClientSettings } from './se
 /** Locale namespace of the browser half. */
 export { NS }
 
-/** Required services: slots for the two composer entries, settings scope for live config, locale for the t seat. */
-export const inject = ['slots', 'settingsScope', 'locale']
+// No hard service dependencies. Every service this half touches (`settingsScope`
+// from the optional settings surface, `slots` and `locale` from the UI packages
+// a given profile may or may not bundle) is reached through `ctx.inject`, which
+// starts the wiring only if and when the service actually mounts. A service
+// named here instead would make this entry sit `pending` forever on a profile
+// that lacks it — and DSH treats a pending entry as a boot failure
+// ("web boot: 1 entry did not activate"), taking the whole GUI down with it.
+// The cost of that choice is degraded, never broken: a profile with no settings
+// surface keeps the bundled default mirror, and one with no locale service
+// renders dictionary keys instead of copy.
+export const inject: string[] = []
 
 /** Apply the browser half. */
 export function apply(ctx: ClientContext): void {
   ensureStyles()
 
-  ctx.effect(() => {
-    try {
-      return ctx.locale.register(NS, dictionaries)
-    } catch {
-      return () => {}
-    }
-  }, 'dsh-prompt-enhance: dictionaries')
+  // Dictionaries arrive with the locale service, which is optional here: a
+  // profile without it renders dictionary keys instead of localized copy, but
+  // the plugin must not block boot over that.
+  ctx.inject(['locale'], (localeCtx: ClientContext) => {
+    ctx.effect(() => {
+      try {
+        return localeCtx.locale.register(NS, dictionaries)
+      } catch {
+        return () => {}
+      }
+    }, 'dsh-prompt-enhance: dictionaries')
+  })
+
+  // Baseline before anything optional mounts: the bundled mirror equals the
+  // host `DEFAULT_CONFIG`, so a profile without the settings surface still gets
+  // a working button, guards, and shortcut instead of an unset mirror.
+  setClientSettings(decodeClientSettings(undefined))
 
   // The settings mirror: re-read on every committed change so the button,
   // the guards, and the shortcut follow Settings → 插件配置 live. The
