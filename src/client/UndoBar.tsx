@@ -22,7 +22,13 @@ export function UndoBar(props: UndoBarProps): ReactNode {
   // 0.1.1-rc.2 carries sessionId on the props; 0.1.2-rc.1 dropped it. Use the
   // host id for UI keying when present, else a stable per-mount fallback.
   const uiKey = useSessionKey(sessionId, inputActions)
-  const draft = useInput((state) => state.draft)
+  // Defensive like the button: a host that omits `draft` must not make the
+  // applied/current comparison read `undefined` as "the user kept typing" and
+  // silently drop an undo entry.
+  const draft = useInput((state) => {
+    const value = (state as { draft?: unknown }).draft
+    return typeof value === 'string' ? value : ''
+  })
   useSyncExternalStore(ui.subscribe, ui.getVersion)
   const entry = ui.peekUndo(uiKey)
 

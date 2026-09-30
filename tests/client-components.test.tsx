@@ -167,6 +167,34 @@ describe('EnhanceButton guard chain', () => {
     fireEvent.click(enhanceButton())
     expect(screen.getByText(zh['error.occurrences'])).toBeTruthy()
   })
+
+  // Regression: `imageIds` / `occurrences` are part of the input snapshot in
+  // the dsh lines this plugin was written against, but a slot host need not
+  // expose them. Reading `.length` off a missing field throws DURING RENDER,
+  // and React answers that by unmounting the whole slot entry behind its error
+  // boundary — the composer silently loses the button and the console fills
+  // with a stack trace (observed live as
+  // "slot entry crashed in 'conversation.input.right'").
+  it('renders when the host input state omits imageIds and occurrences', () => {
+    const input = makeFakeInput({ draft: '旧原文' })
+    const bare = {
+      useInput: <S,>(selector: (s: { draft: string; phase: string }) => S): S => selector({ draft: '旧原文', phase: 'plain' }),
+      set: () => {},
+    }
+    expect(() => {
+      render(
+        <>
+          <EnhanceButton {...({ t, sessionId: 's1', useInput: bare.useInput, inputActions: { setDraft: vi.fn() } } as never)} />
+          <UndoBar {...({ t, sessionId: 's1', useInput: bare.useInput, inputActions: { setDraft: vi.fn() } } as never)} />
+        </>,
+      )
+    }).not.toThrow()
+    // The button is on screen and none of the advisory guards misfired.
+    expect(enhanceButton()).toBeTruthy()
+    expect(screen.queryByText(zh['error.imagesOnly'])).toBeNull()
+    expect(screen.queryByText(zh['error.occurrences'])).toBeNull()
+    expect(input).toBeDefined()
+  })
 })
 
 describe('enhance → apply → undo loop', () => {

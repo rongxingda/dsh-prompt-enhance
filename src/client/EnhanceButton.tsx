@@ -24,6 +24,37 @@ import { useSessionKey, serverSessionId } from './session-key'
 /** Props of the input.right entry: the InputZone owner share + session kit + locale seat. */
 export type EnhanceButtonProps = PropsRuntime<'conversation.input.right'> & PropsLocale<'prompt-enhance'>
 
+/**
+ * Read the length of an optional array-shaped field out of the host's input
+ * state.
+ *
+ * `imageIds` and `occurrences` are part of the conversation input snapshot in
+ * the dsh lines this plugin was written against, but a slot host is not
+ * obliged to expose them, and reading `.length` off a missing field throws
+ * *during render* — which React answers by unmounting the whole slot entry
+ * behind its error boundary, so the composer loses the button and the console
+ * fills with a stack trace instead of a usable feature. Reading defensively
+ * turns an absent or malformed field into "no such count", which only disables
+ * the corresponding advisory guard; the enhancement itself still runs.
+ * @param value - the untrusted field.
+ * @returns the array length, or 0 when the field is absent/not an array.
+ */
+function countOf(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0
+}
+
+/**
+ * Read a field that downstream code requires to be a string. `draft` drives
+ * `checkInputText`, which iterates the text — an absent field would throw on
+ * click instead of on render, but it is the same class of brittleness against
+ * an unknown host state shape.
+ * @param value - the untrusted field.
+ * @returns the string, or `''` when the field is absent/not a string.
+ */
+function stringOf(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
 /** One composer's enhance trigger. */
 export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const { t, sessionId, useInput, inputActions } = props
@@ -31,10 +62,10 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   // host id for UI keying when present, else a stable per-mount fallback.
   const uiKey = useSessionKey(sessionId, inputActions)
   const wireId = serverSessionId(sessionId)
-  const draft = useInput((state) => state.draft)
-  const phase = useInput((state) => state.phase)
-  const occurrenceCount = useInput((state) => state.occurrences.length)
-  const imageCount = useInput((state) => state.imageIds.length)
+  const draft = useInput((state) => stringOf((state as { draft?: unknown }).draft))
+  const phase = useInput((state) => (state as { phase?: unknown }).phase)
+  const occurrenceCount = useInput((state) => countOf((state as { occurrences?: unknown }).occurrences))
+  const imageCount = useInput((state) => countOf((state as { imageIds?: unknown }).imageIds))
   const settings = useSyncExternalStore(subscribeClientSettings, getClientSettings)
   const panel = useSyncExternalStore(ui.subscribe, ui.getPanel)
   const rootRef = useRef<HTMLButtonElement | null>(null)
