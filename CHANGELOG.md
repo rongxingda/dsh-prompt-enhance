@@ -2,6 +2,14 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); releases from **0.2.3** onward also have a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes (0.2.0–0.2.2 are tagged but have no Release page — see this file for their notes).
 
+## 0.2.5 (2026-09-30)
+
+Two metadata corrections; no runtime behavior changes.
+
+**`dsh.engines.dsh` is now bounded: `>=0.1.1-rc.2 <0.2.0`.** It previously read `>=0.1.1-rc.2` — an open-ended claim that *any* future harness version is supported, which the project cannot back: boot verification covers `0.1.1-rc.2`, `0.1.2-alpha.3`, and `0.1.7-rc.2`, while the current npm line is already `0.2.0-rc.2`. The ceiling states what has actually been exercised. `<0.2.0` (rather than `<0.1.8`) is deliberate: per semver, a prerelease only matches a range that names a prerelease, so `<0.1.8` would have **excluded the verified `0.1.7-rc.2`** — the exact version the range must keep. `<0.2.0` keeps every `0.1.x` and excludes the unverified `0.2.0-rc.1` / `0.2.0-rc.2`. Widening it after a successful 0.2.x boot is a one-line change; both READMEs now say so and invite reports.
+
+**`dsh.client.inject` no longer lists `@deepseek-ai/dsh-client-ui-settings`.** That entry dated from the layout in which the browser half hard-declared the settings surface — the declaration that produced `web boot: 1 entry did not activate` on a profile without it. The half now reaches `settingsScope` (and `slots`, `locale`) through optional `ctx.inject`, so the module no longer belongs in the required-provider list.
+
 ## 0.2.4 (2026-09-30)
 
 Packaging-only follow-up to 0.2.3; no runtime behavior changes.
