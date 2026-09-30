@@ -1,8 +1,8 @@
 # dsh-prompt-enhance 代码审阅报告
 
 审阅对象：`dsh-prompt-enhance@0.2.2`（单包双半的 DSH Web GUI 提示词增强插件）
-审阅方式：全量静态阅读 + 依赖契约逐项比对 + 真实 `tsc`/`vitest`/`esbuild` 验证
-最终状态：typecheck 通过、**19 文件 / 202 用例全绿**、`lib/` 产物与 `src/` 一致
+审阅方式：全量静态阅读 + 依赖契约逐项比对 + 真实 `tsc`/`vitest`/`esbuild` 验证 + **GUI 实机冒烟**
+最终状态：typecheck 通过、**20 文件 / 207 用例全绿**、`lib/` 产物与 `src/` 一致、**插件在真实 `dsh web` 中加载并可用**
 
 ---
 
@@ -95,6 +95,18 @@ src/
 
 **处置**：新增 `src/sse.ts`——帧在缓冲区满时停靠至 `drain`，`close` 释放停靠，`dispose()` 释放监听；配 10 条单测。
 
+### P0-4　浏览器半硬声明可选服务，导致整个 Web 启动失败（本次审阅引入的回归）
+
+我把 `settingsScope` 写进了客户端半的 `inject`。cordis 的契约是"`inject` 里列了谁，就等于没有它就不加载"（`Plugin.Base.inject`：*Services the plugin requires; it only loads while all are available*），而该服务由可选的设置面板包 `@deepseek-ai/dsh-client-ui-settings` 提供——目标 profile 的 bundles 名单里没有它。结果插件永久 `pending`，shell 把"有 entry 没激活"当作致命错误，**整个 GUI 白屏**，报错为 `web boot: 1 entry did not activate`。
+
+**处置**：改为**不硬依赖任何服务**——`slots`／`locale`／`settingsScope` 全部走可选的 `ctx.inject`，`apply` 本体不直接触碰任何服务；缺服务时降级（无设置面板则用内置默认值，无 locale 则渲染字典键）。配 `tests/client-apply.test.ts`（4 条）锁定"裸环境也必须能启动"。
+
+### P0-5　渲染期脆性读取使插槽条目被错误边界卸载（既有缺陷）
+
+`EnhanceButton` 直接读 `state.imageIds.length` / `state.occurrences.length`。这两个字段在插件编写时所依据的 dsh 版本里属于输入快照，但 slot 宿主不保证提供；字段缺失时 `.length` 在**渲染期**抛错，React 错误边界据此卸载整个 `conversation.input.right` 条目——表现为按钮消失 + 控制台狂刷同一条堆栈（实测 `slot entry crashed in 'conversation.input.right'`），功能彻底不可用。
+
+**处置**：新增 `countOf` / `stringOf` 防御式读取：字段缺失或类型畸形一律降级为"无此计数 / 空串"，代价仅是两条**提示性**守卫（仅图片、含命令块）不触发，增强本身照常。同时给 `UndoBar` 的 `draft` 读取加同样防护（避免把 `undefined` 误判为"用户继续输入"而静默丢弃撤销记录）。配一条回归用例：宿主只提供 `{ draft, phase }` 时按钮必须照常渲染。
+
 ### P1-3　其他
 
 - `context.ts` 用 UTF-16 单元而非码点计上下文预算（中文/emoji 场景预算偏差约 2 倍），截断还可能劈开代理对 → 改用共享 `countText` 并按码点截断。
@@ -113,26 +125,38 @@ src/
 | 检查 | 结果 |
 |---|---|
 | `npm run typecheck` | 通过，无错误 |
-| `npm test` | **19 文件 / 202 用例全绿** |
+| `npm test` | **20 文件 / 207 用例全绿** |
 | `npm run build` | 通过；`lib/index.js` 与 `lib/client.js` 均含最新逻辑 |
 | `git status`（build 后） | 无产物漂移，符合 CI 的 lib 一致性校验 |
 | SSE 协议 | 裸 socket 确认 `0\r\n\r\n` 终止符存在；`response.text()` 正常返回 |
+| 安装形态 | `dsh plugin --profile web add link:C:\prompt-enhance-fresh`，插件行显示为 `link:` |
+| **GUI 实机** | **插件在真实 `dsh web` 中加载成功、按钮渲染、增强流程可用** |
 
 **审阅过程中被证伪的两处自身判断（记录以示校准）**
 
 1. 我曾判定「`README.md`／`README.zh-CN.md` 不存在、需补写」——错，两份都存在（305／304 行），是目录列举被输出截断误导；最终未改写，只补了 `docs/` 并同步架构树。
 2. 我曾推测 `tests/client-components.test.tsx` 导出的 `sessionId` 是类型错误——错，`dsh-client-runtime` 通过声明合并提供了它（`SessionIdentity` 非可选）；真正的类型错误只有 `InputState` 一处。
 
+**另一条被实践证的教训**：207 个自动化用例全绿，而插件在真实宿主里一加载就崩（P0-5）。差别在于"宿主不提供某些字段"这种**跨版本形状差异**，只有真正装进宿主才暴露得出来——因此新增的两组用例（`tests/client-apply.test.ts` 的裸环境启动、`tests/client-components.test.tsx` 的缺字段渲染）都把"宿主比预期更贫瘠"当作一等公民来锁定。
+
 ---
 
-## 五、仍未验证：GUI 实机冒烟
+## 五、GUI 冒烟结果
 
-自动化只能覆盖到协议与组件层。以下需在浏览器里人工过一遍：
+已在真实 `dsh web` 中完成基础冒烟：插件加载、作曲区按钮渲染、增强流程可用。
 
-1. Settings → 插件配置出现 `prompt-enhance` 分区，改写 `provider`/`model` 后**下一次请求即生效**。
-2. ✨ 按钮与 `Ctrl+Alt+E` 走同一流程；空输入/超长/仅图片/含引用块各自给出可读拒绝文案。
+仍建议按需逐条确认的细项（均已有自动化覆盖，此处仅列人工回归点）：
+
+1. Settings → 插件配置出现 `prompt-enhance` 分区（目标 profile 未打包设置面板时，此项**预期不出现**，功能自动使用内置默认值）。
+2. ✨ 按钮与 `Ctrl+Alt+E` 走同一流程；空输入/超长/含引用块各自给出可读拒绝文案。
 3. 预览面板：回填 → 撤销条出现 → 撤销恢复原文；复制可用（含非安全上下文回退）。
-4. 流式增强：文字边写边显示，结束后面板**平滑切到规范化结果**（本次的 `display.finish()` 冲刷确保末尾字符不丢）。
+4. 流式增强：文字边写边显示，结束后面板**平滑切到规范化结果**（`display.finish()` 冲刷确保末尾字符不丢）。
 5. `/enhance <文本>` 在命令面板可复制、不进入模型历史。
-6. 多会话布局：另一会话增强中时，本会话按钮显示"另一个会话正在增强中"而非静默变灰。
+6. 多会话布局：另一会话增强中时，本会话按钮给出"另一个会话正在增强中"提示而非静默变灰。
 7. 上游错误（如错误 API Key）能否显示**具体**修复提示（对应 P0-1 的修复面）。
+
+---
+
+## 六、安装形态提醒
+
+当前 profile 通过 `link:` 指向本仓库，**宿主半改动必须重启 `dsh web`**；且 profile 的 `package.json` 里若残留 `^0.2.x` 语义版本声明，任何一次 `npm install` 都可能把 `link:` 覆盖回 npm 上的版本，从而静默丢掉本地修复。
