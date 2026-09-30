@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); releases from **0.2.3** onward also have a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes (0.2.0–0.2.2 are tagged but have no Release page — see this file for their notes).
 
+## 0.2.7 (2026-09-30)
+
+Documentation-only version bump; `src/` and `lib/` are identical to 0.2.6 and the shipped bundles are unchanged.
+
+Carries the corrected record of the `0.2.0-rc.2` verification. 0.2.6's notes described that verification as having happened on the global CLI, which understated it: the environment the plugin is actually used in day to day is the dsh **desktop application**, whose `FileVersion` is `0.2.0-rc.2` as well. Both hosts were exercised, and both READMEs now say so. Nothing about the supported range changes — it remains `>=0.1.1-rc.2 <0.3.0`.
+
 ## 0.2.6 (2026-09-30)
 
 Verified on the `0.2.x` runtime — including the dsh **desktop application** at `0.2.0-rc.2`, which is the environment the plugin is actually used in day to day. No runtime behavior changes.
