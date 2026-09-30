@@ -200,6 +200,20 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
           await sse.write(`event: delta\ndata: ${JSON.stringify({ type: 'delta', text: tail })}\n\n`)
         }
         await sse.write(`event: done\ndata: ${JSON.stringify({ type: 'done', value })}\n\n`)
+        // Terminate the response. Without this the chunked body never receives
+        // its closing `0\r\n\r\n`, so the connection stays half-open: a browser
+        // client survives only because it returns on the `done` frame and
+        // cancels the reader, but any whole-body reader (`response.text()`, a
+        // curl, a proxy) waits forever, and the socket can never be reused.
+        // Guarded because a client that vanished mid-stream leaves a dead
+        // socket, where ending would throw and mask the real outcome.
+        if (!res.writableEnded && !res.destroyed) {
+          try {
+            res.end()
+          } catch {
+            // Half-closed socket: there is nothing left to terminate.
+          }
+        }
       } finally {
         // Always release the transport listener, success or failure.
         sse.dispose()

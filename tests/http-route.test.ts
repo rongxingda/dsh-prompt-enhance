@@ -449,6 +449,12 @@ describe('POST /prompt-enhance/enhance-stream (real http, SSE)', () => {
    * the reader drains it. `response.text()` would therefore wait for a body the
    * server is waiting for the reader to consume — the hang this helper exists
    * to avoid. A real browser client streams the same way.
+   *
+   * This helper is also the regression lock for response termination: it only
+   * resolves once the stream ENDS. The route must call `res.end()` after the
+   * done frame — without it the chunked body lacks its `0\r\n\r\n` terminator
+   * and the read never completes (the browser client hides that by returning on
+   * the done frame and cancelling its reader), so these tests time out.
    */
   async function callStream(server: Server, text: string, extraHeaders: Record<string, string> = {}): Promise<{ status: number; contentType: string; body: string }> {
     const { port } = server.address() as AddressInfo
