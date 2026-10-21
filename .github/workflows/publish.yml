@@ -1,0 +1,81 @@
+name: Publish
+
+# Trusted publishing (OIDC). The registry authenticates the workflow run
+# itself, so there is no npm token to store, rotate, or leak — and no one-time
+# password for a human to type. Every requirement is satisfied below:
+#   * npm CLI >= 11.5.1 and Node >= 22.14 on a GitHub-hosted runner
+#     (npm is upgraded to the latest line in its own step)
+#   * `id-token: write`, granted per job
+#   * a Trusted Publisher entry on npmjs.com naming this exact file:
+#     user `rongxingda`, repo `dsh-prompt-enhance`, workflow `publish.yml`
+# Provenance is attached automatically (public repo, public package), so no
+# `--provenance` flag is passed.
+on:
+  push:
+    tags: ['v*']
+  # Publishes a tag that already exists, e.g. v0.3.0 pushed before the trusted
+  # publisher was configured, and retries a run that died mid-publish.
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Trusted publishing needs Node >= 22.14. The npm that ships with it
+          # is older than the 11.5.1 OIDC floor, so npm is upgraded below.
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Upgrade npm to the OIDC-capable line
+        run: |
+          npm install -g npm@latest
+          npm --version
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Verify lib/ is committed and fresh
+        shell: bash
+        run: |
+          if ! git diff --quiet lib/; then
+            echo "::error::lib/ differs from the committed build — run 'npm run build' and commit before tagging"
+            git diff --stat lib/
+            exit 1
+          fi
+      - name: Verify the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
+      - name: Confirm the OIDC identity is actually available
+        shell: bash
+        run: |
+          # Without `id-token: write` the run would fail deep inside npm with a
+          # 404 from the registry, which reads like a trusted-publisher typo.
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::no OIDC endpoint in the environment — the job is missing permissions: id-token: write"
+            exit 1
+          fi
+          echo "OIDC endpoint present"
+      - name: Fail fast if this version is already published
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "dsh-prompt-enhance@${version}" version >/dev/null 2>&1; then
+            echo "::error::dsh-prompt-enhance@${version} is already on the registry — bump the version before publishing again"
+            exit 1
+          fi
+          echo "dsh-prompt-enhance@${version} is new"
+      # The three gates above are exactly what `prepublishOnly` runs, so the
+      # hook is skipped rather than paying for a second build and test pass.
+      - run: npm publish --ignore-scripts
