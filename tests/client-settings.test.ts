@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { decodeClientSettings, DEFAULT_CLIENT_SETTINGS } from '../src/client/settings'
+import { DEFAULT_CONFIG } from '../src/config'
 
 describe('decodeClientSettings', () => {
+  it('mirrors the host defaults field by field', () => {
+    // The compile-time `AssertMirror` in settings.ts only proves the KEY SET
+    // matches. A changed host default would otherwise drift in silence: the
+    // settings page shows one number while the composer guards against another.
+    expect(DEFAULT_CLIENT_SETTINGS).toEqual({
+      enabled: DEFAULT_CONFIG.enabled,
+      maxInputChars: DEFAULT_CONFIG.maxInputChars,
+      shortcut: DEFAULT_CONFIG.shortcut,
+      streaming: DEFAULT_CONFIG.streaming,
+    })
+  })
+
   it('returns defaults for a missing or malformed section', () => {
     expect(decodeClientSettings(undefined)).toEqual(DEFAULT_CLIENT_SETTINGS)
     expect(decodeClientSettings(null)).toEqual(DEFAULT_CLIENT_SETTINGS)

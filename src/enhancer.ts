@@ -11,6 +11,23 @@ import type { GenerateOptions, FinishReason, StreamChunk } from '@deepseek-ai/ds
 import type { EnhanceError, EnhanceResult } from './shared/protocol'
 import { normalizeOutput } from './shared/normalize'
 import { frameUserPrompt } from './prompts'
+
+/**
+ * Producer identity of this plugin's model traffic.
+ *
+ * dsh 0.2.x dropped the catch-all `{ kind: 'plugin' }` source and made
+ * `MessageSourceMap` merge-extensible instead: every producer declares its own
+ * `kind` in its own module, and consumers fall through kinds they do not know.
+ * Declaring the kind here keeps the attribution honest (the harness can tell
+ * this message was not typed by the user) and is the shape the harness's own
+ * plugins use.
+ */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'prompt-enhance': { kind: 'prompt-enhance' }
+  }
+}
+
 /** Structural LLM face so tests stub the stream without a Cordis runtime. */
 export interface LlmStreamFace {
   stream(options: GenerateOptions): AsyncIterable<StreamChunk>
@@ -111,7 +128,7 @@ export async function enhanceText(llm: LlmStreamFace, options: EnhanceCallOption
     const messages = [
       createUserMessage({
         content: [{ type: 'text', text: frameUserPrompt(options.text, options.context) }],
-        source: { kind: 'plugin', plugin: 'dsh-prompt-enhance' },
+        source: { kind: 'prompt-enhance' },
       }),
     ]
     const generate: GenerateOptions = {
@@ -278,6 +295,7 @@ export function formatEnhanceError(error: EnhanceError): string {
     case 'rejected': text = '增强请求被拒绝。'; break
     case 'rate-limit': text = `请求过于频繁：每分钟最多 ${params.limit ?? '?'} 次增强，请 ${params.retryAfterSeconds ?? '稍候'} 秒后再试。`; break
     case 'concurrency-limit': text = `已有 ${params.max ?? '?'} 个增强在进行中，请等待其中一个完成后再试。`; break
+    case 'cooldown': text = `连续 ${params.failures ?? '?'} 次增强失败，已暂停调用以避免持续冲击模型服务；请 ${params.retryAfterSeconds ?? '?'} 秒后重试，或先检查插件设置中的模型配置。`; break
     case 'timeout': text = `增强超时（${params.seconds ?? '?'} 秒），可重试；原输入未改动。`; break
     case 'unconfigured': text = '尚未确定增强用的模型：请在插件设置中成对填写 provider/model，或先在当前会话发送一条消息（将跟随会话模型）。'; break
     case 'upstream': text = typeof params.reason === 'string' ? (REASON_HINTS[params.reason as UpstreamReason] ?? '模型服务返回错误，请重试；原输入未改动。') : '模型服务返回错误，请重试；原输入未改动。'; break

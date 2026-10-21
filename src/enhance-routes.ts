@@ -21,10 +21,29 @@ import { readBoundedJson, writeJson } from './http'
 /** Envelope slack over the UTF-8 text cap: JSON quoting can inflate ~2-6x in the worst case. */
 const bodyCapOf = (maxInputChars: number): number => maxInputChars * 6 + 4096
 
-/** Per-mount admission state: sliding-window rate stamps + active-call count. */
+/**
+ * Consecutive FAILED calls that trip the cool-down, and how long it lasts.
+ *
+ * The sliding window below counts successful calls only, so a run of timeouts
+ * never burns the user's quota (see the gate note in serveEnhance). That
+ * leaves one hole: a deterministic upstream failure — a wrong API key, a
+ * mistyped provider, a model the account cannot reach — fails in
+ * milliseconds, and a retry loop against such a failure is bounded only by
+ * the concurrency cap, i.e. barely at all. Three consecutive failures are
+ * enough to tell "the model is flaky" from "this route cannot work", so the
+ * route pauses instead of hammering the provider.
+ */
+const FAILURE_STREAK_LIMIT = 3
+const FAILURE_COOLDOWN_MS = 30_000
+
+/** Per-mount admission state: sliding-window rate stamps, active-call count, failure breaker. */
 interface AdmissionGate {
   stamps: number[]
   active: number
+  /** Consecutive failed calls since the last success. */
+  failures: number
+  /** Epoch millis until which every call is refused with `cooldown`. */
+  cooldownUntil: number
 }
 
 /**
@@ -81,7 +100,11 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
   const cap = bodyCapOf(config.maxInputChars)
   const declaredLength = Number(req.headers['content-length'])
   if (Number.isFinite(declaredLength) && declaredLength > cap) {
-    res.once('finish', () => res.socket?.destroy())
+    // `connection: close` instead of destroying the socket: the 413 still has
+    // to reach the caller, and a blunt destroy also kills whatever else rides
+    // this keep-alive connection. Declaring the connection non-reusable lets
+    // Node discard the unread body and close on its own schedule.
+    res.setHeader('connection', 'close')
     writeJson(res, 413, { ok: false, error: { code: 'rejected', message: '请求体超过大小上限。' } })
     return
   }
@@ -126,6 +149,18 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
   // bounds in-flight calls regardless of outcome, so failed calls cannot be
   // used to hammer the upstream either.
   const now = Date.now()
+  // Failure breaker first: a host stuck on a broken route must refuse before
+  // it reads a body or spends a window slot, and the wait is advertised so the
+  // panel can say when to try again.
+  if (now < gate.cooldownUntil) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((gate.cooldownUntil - now) / 1000))
+    res.setHeader('Retry-After', String(retryAfterSeconds))
+    writeJson(res, 429, {
+      ok: false,
+      error: { code: 'cooldown', params: { retryAfterSeconds, failures: FAILURE_STREAK_LIMIT } },
+    })
+    return
+  }
   // Trim the window in one splice instead of a `while (shift)` loop: with the
   // configured cap at 600 the worst case drops from O(N²) array shifts to a
   // single O(N) relocation. The cap is bounded, so this stays cheap in
@@ -226,7 +261,17 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
     // (see the gate note above). `Date.now()` at completion, not admission,
     // keeps the window honest — a slow success still counts as one call.
     stamps.push(Date.now())
+    gate.failures = 0
   } catch (error) {
+    // A caller that walked away is not a failing route: aborting mid-flight
+    // must never move the breaker toward its cool-down.
+    if (!callerAbort.signal.aborted) {
+      gate.failures += 1
+      if (gate.failures >= FAILURE_STREAK_LIMIT) {
+        gate.cooldownUntil = Date.now() + FAILURE_COOLDOWN_MS
+        gate.failures = 0
+      }
+    }
     const wire = toEnhanceError(error)
     if (stream && res.headersSent) {
       // Headers are already out: the failure has to ride the same stream.
@@ -244,9 +289,20 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
  * Contexts that already own the route. The admission gate is created per
  * registration, so mounting twice on one context would silently double the
  * effective limits — exactly the drift a re-applied plugin (reload, re-link)
- * must not introduce. Re-applying reuses the first mount instead.
+ * must not introduce.
+ *
+ * The recorded mount carries the webserver it was registered on: if the host
+ * ever rebuilds that service while reusing the same context, a bare "already
+ * mounted" flag would leave the plugin alive with no route at all (button
+ * present, every click 404). Comparing identities lets the registration heal
+ * itself instead of staying silently absent.
  */
-const mountedContexts = new WeakSet<Context>()
+interface RouteMount {
+  webserver: unknown
+  dispose: () => void
+}
+
+const mounts = new WeakMap<Context, RouteMount>()
 
 /**
  * Register the /prompt-enhance prefix route on the shared webserver. Absent
@@ -257,12 +313,23 @@ const mountedContexts = new WeakSet<Context>()
  * @param readConfig - per-request config reader so settings changes apply immediately.
  */
 export function registerEnhanceRoute(ctx: Context, readConfig: () => Config): void {
-  const webserver = ctx.get('webServer')
+  const webserver = ctx.get('webServer') as unknown as {
+    register(route: unknown): unknown
+  } | undefined
   if (webserver === undefined) return
-  if (mountedContexts.has(ctx)) return
-  mountedContexts.add(ctx)
-  const gate: AdmissionGate = { stamps: [], active: 0 }
-  webserver.register({
+  const existing = mounts.get(ctx)
+  if (existing !== undefined && existing.webserver === webserver) return
+  if (existing !== undefined) {
+    // The service was rebuilt: drop the stale registration (it belongs to a
+    // webserver that no longer serves) and mount on the live one.
+    try {
+      existing.dispose()
+    } catch {
+      // Already torn down with the old service.
+    }
+  }
+  const gate: AdmissionGate = { stamps: [], active: 0, failures: 0, cooldownUntil: 0 }
+  const dispose = webserver.register({
     kind: 'prefix',
     path: ENHANCE_PREFIX,
     handler: (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -270,4 +337,5 @@ export function registerEnhanceRoute(ctx: Context, readConfig: () => Config): vo
       return serveEnhance(ctx, readConfig, gate, pathname, req, res, pathname === ENHANCE_STREAM_ENDPOINT)
     },
   })
+  mounts.set(ctx, { webserver, dispose: typeof dispose === 'function' ? dispose as () => void : () => {} })
 }

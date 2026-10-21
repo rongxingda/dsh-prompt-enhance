@@ -4,8 +4,9 @@
 # `dsh plugin --profile web add link:<repo>/dsh-prompt-enhance`.
 #
 # One package, both halves: the node half (exports ".") runs in the host
-# process and registers the POST /prompt-enhance/enhance route, the
-# /enhance slash command, and the "prompt-enhance" settings section; the
+# process and registers the POST /prompt-enhance/enhance route and the
+# /enhance slash command, and declares the "prompt-enhance" settings schema
+# this entry's config page renders (read live, per request); the
 # browser half (declared by `dsh.client`, served from lib/client.js) adds
 # the composer enhance button (conversation.input.right), the preview
 # panel, and the undo bar (conversation.input.dock).

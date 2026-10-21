@@ -75,6 +75,7 @@ function localizedErrorMessage(
     case 'rejected': return t('error.rejected')
     case 'rate-limit': return t('error.rateLimit', params)
     case 'concurrency-limit': return t('error.concurrencyLimit', params)
+    case 'cooldown': return t('error.cooldown', params)
     case 'timeout': return t('error.timeout', params)
     case 'unconfigured': return t('error.unconfigured')
     case 'upstream': return t('error.upstream')

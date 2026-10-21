@@ -34,7 +34,10 @@ import { DEFAULT_CLIENT_SETTINGS, setClientSettings } from '../src/client/settin
  */
 interface InputState {
   readonly draft: string
-  readonly imageIds: readonly unknown[]
+  /** 0.2.x field name for composer attachments. */
+  readonly attachmentIds: readonly unknown[]
+  /** 0.1.x predecessor of {@link attachmentIds}; both are exercised below. */
+  readonly imageIds?: readonly unknown[]
   readonly occurrences: readonly { readonly hint?: string }[]
   readonly phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'
   readonly draftRev: number
@@ -64,7 +67,7 @@ function makeFakeInput(initial: Partial<InputState> & { draft: string }) {
   let state: InputState = {
     phase: 'plain',
     occurrences: [],
-    imageIds: [],
+    attachmentIds: [],
     draftRev: 0,
     queue: [],
     ...initial,
@@ -154,11 +157,20 @@ describe('EnhanceButton guard chain', () => {
     expect(requestEnhance).not.toHaveBeenCalled()
   })
 
-  it('refuses image-only drafts', () => {
+  it('refuses attachment-only drafts (0.2.x `attachmentIds`)', () => {
+    const input = makeFakeInput({ draft: '', attachmentIds: ['att1' as never] })
+    renderComposer(input, { setDraft: vi.fn() } as never, 's1')
+    fireEvent.click(enhanceButton())
+    expect(screen.getByText(zh['error.attachmentsOnly'])).toBeTruthy()
+  })
+
+  // The guard must keep working on hosts from the 0.1.x line, whose input state
+  // still calls the same field `imageIds`.
+  it('refuses attachment-only drafts on the legacy `imageIds` field', () => {
     const input = makeFakeInput({ draft: '', imageIds: ['img1' as never] })
     renderComposer(input, { setDraft: vi.fn() } as never, 's1')
     fireEvent.click(enhanceButton())
-    expect(screen.getByText(zh['error.imagesOnly'])).toBeTruthy()
+    expect(screen.getByText(zh['error.attachmentsOnly'])).toBeTruthy()
   })
 
   it('refuses drafts containing reference chips', () => {
@@ -168,14 +180,13 @@ describe('EnhanceButton guard chain', () => {
     expect(screen.getByText(zh['error.occurrences'])).toBeTruthy()
   })
 
-  // Regression: `imageIds` / `occurrences` are part of the input snapshot in
-  // the dsh lines this plugin was written against, but a slot host need not
-  // expose them. Reading `.length` off a missing field throws DURING RENDER,
-  // and React answers that by unmounting the whole slot entry behind its error
-  // boundary — the composer silently loses the button and the console fills
-  // with a stack trace (observed live as
-  // "slot entry crashed in 'conversation.input.right'").
-  it('renders when the host input state omits imageIds and occurrences', () => {
+  // Regression: attachment ids / `occurrences` are part of the input snapshot
+  // in the dsh lines this plugin targets, but a slot host need not expose them.
+  // Reading `.length` off a missing field throws DURING RENDER, and React
+  // answers that by unmounting the whole slot entry behind its error boundary —
+  // the composer silently loses the button and the console fills with a stack
+  // trace (observed live as "slot entry crashed in 'conversation.input.right'").
+  it('renders when the host input state omits attachment ids and occurrences', () => {
     const input = makeFakeInput({ draft: '旧原文' })
     const bare = {
       useInput: <S,>(selector: (s: { draft: string; phase: string }) => S): S => selector({ draft: '旧原文', phase: 'plain' }),
@@ -191,7 +202,7 @@ describe('EnhanceButton guard chain', () => {
     }).not.toThrow()
     // The button is on screen and none of the advisory guards misfired.
     expect(enhanceButton()).toBeTruthy()
-    expect(screen.queryByText(zh['error.imagesOnly'])).toBeNull()
+    expect(screen.queryByText(zh['error.attachmentsOnly'])).toBeNull()
     expect(screen.queryByText(zh['error.occurrences'])).toBeNull()
     expect(input).toBeDefined()
   })

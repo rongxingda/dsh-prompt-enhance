@@ -33,6 +33,7 @@ const KNOWN_ERROR_CODES = new Set<EnhanceErrorCode>([
   'rejected',
   'rate-limit',
   'concurrency-limit',
+  'cooldown',
   'timeout',
   'upstream',
   'unconfigured',

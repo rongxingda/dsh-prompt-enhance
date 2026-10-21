@@ -23,6 +23,22 @@ export const ENHANCE_PREFIX = '/prompt-enhance'
  */
 export const ENHANCE_STREAM_ENDPOINT = '/prompt-enhance/enhance-stream'
 
+/**
+ * Profile entry ids the plugin's settings section may be served under.
+ *
+ * The bare package name is what {@link PROMPT_ENHANCE_NAMESPACE} inserts, but
+ * an aggregate bundle renames child rows (`prompt-enhance` becomes
+ * `web-ui-prompt-enhance`), and the dsh 0.2.x settings service addresses rows
+ * by that id rather than by namespace. Both halves probe the same list in the
+ * same order, so the host section and the browser mirror can never resolve to
+ * two different documents.
+ */
+export const PROMPT_ENHANCE_ROW_IDS: readonly string[] = [
+  'prompt-enhance',
+  'dsh-prompt-enhance',
+  'web-ui-prompt-enhance',
+]
+
 /** Request body of one enhance call. */
 export interface EnhanceRequestBody {
   /** Session whose model route should serve the call; absent forces settings/defaults. */
@@ -54,6 +70,7 @@ export type EnhanceErrorCode =
   | 'rejected'
   | 'rate-limit'
   | 'concurrency-limit'
+  | 'cooldown'
   | 'timeout'
   | 'upstream'
   | 'unconfigured'
@@ -74,6 +91,7 @@ export interface EnhanceError {
    * Structured parameters the localized primary line interpolates:
    * - rate-limit: { limit, retryAfterSeconds }
    * - concurrency-limit: { max }
+   * - cooldown: { retryAfterSeconds, failures } — the failure breaker tripped
    * - timeout: { seconds }
    * - rejected with { count, max }: the over-length input message
    * - upstream: optional { reason } selecting a fix hint (auth, quota, …)

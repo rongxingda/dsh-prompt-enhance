@@ -7,20 +7,32 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      # One red cell should not hide the others: the point of the matrix is to
+      # know exactly which (os, node) pair broke.
+      fail-fast: false
+      matrix:
+        # The plugin ships to Windows desktop users first (`dsh` there is a
+        # Windows app), while the harness itself is developed on Linux. Testing
+        # only one of them means a path/case/line-ending break reaches users.
+        os: [ubuntu-latest, windows-latest]
+        # `engines` allows ^22.19.0 || >=24.0.0, so CI must cover both floors:
+        # a bare `22` may resolve below 22.19 (making CI test a runtime the
+        # package refuses), and Node 24 is the other supported line.
+        node: ['22.19', '24']
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # Must satisfy `engines` (`^22.19.0 || >=24.0.0`): a bare `22` may
-          # resolve below 22.19, making CI test a runtime the package refuses.
-          node-version: '22.19'
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
       - name: Verify lib/ is committed and fresh
+        shell: bash
         run: |
           if ! git diff --quiet lib/; then
             echo "::error::lib/ differs from the committed build — run 'npm run build' and commit before pushing"

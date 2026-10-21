@@ -82,8 +82,18 @@ export const DEFAULT_CONFIG: Config = {
   contextMaxChars: 4000,
 }
 
-/** The settings section schema (rendered by the built-in plugin config page). */
-export const Config: z<Config> = z.object({
+/**
+ * The settings section schema (rendered by the built-in plugin config page).
+ *
+ * Deliberately left to inference instead of annotated `z<Config>`: on the
+ * schemastery line bundled with dsh 0.2.x the object schema's `meta.default`
+ * carries `Volatile<…>` variants that are not assignable to a plain `Config`
+ * default type, so an explicit annotation rejects an otherwise valid schema.
+ * The runtime contract (a schemastery schema the loader renders) is what
+ * matters here; the interface above stays the compile-time shape of the
+ * values this plugin reads.
+ */
+export const Config = z.object({
   enabled: z.boolean().default(DEFAULT_CONFIG.enabled).description('总开关：关闭后隐藏输入框增强按钮并停用所有触发方式'),
   provider: z.string().description('覆盖模型路由的 provider（与「模型」必须成对填写；留空跟随当前会话模型）'),
   model: z.string().description('覆盖模型路由的 model（与「provider」必须成对填写；留空跟随当前会话模型）'),

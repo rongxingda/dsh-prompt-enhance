@@ -51,15 +51,21 @@ interface StubContext {
 /** Build a stub context exposing the services the plugin half reads. */
 function stubContext(llm: ReturnType<typeof makeLlm>): StubContext {
   const captured: CapturedRoute[] = []
+  // One stable service object per context, exactly like cordis: the plugin
+  // compares service identity to decide whether a re-apply must re-mount.
+  const webserver = {
+    register(route: CapturedRoute): () => void {
+      captured.push(route)
+      return () => {}
+    },
+  }
   const ctx = {
     effect(fn: () => unknown): () => void {
       fn()
       return () => {}
     },
     get(key: string): unknown {
-      if (key === 'webServer') {
-        return { register(route: CapturedRoute): () => void { captured.push(route); return () => {} } }
-      }
+      if (key === 'webServer') return webserver
       if (key === 'llm') return llm
       if (key === 'sessions') return { get: (): undefined => undefined }
       if (key === 'settings') return { get: (): unknown => ({ provider: 'zhipu', model: 'glm-5.3' }) }
@@ -411,6 +417,61 @@ describe('admission gate: Origin / rate / concurrency', () => {
     }
   })
 
+  it('trips a cool-down after three consecutive failures', async () => {
+    // The success-only window leaves fast, deterministic failures unbounded;
+    // the breaker closes that hole without touching the window's semantics.
+    let calls = 0
+    const failing = {
+      stream: (): AsyncIterable<StreamChunk> => {
+        calls += 1
+        return streamOf([], [{ type: 'finish', reason: { kind: 'error', failure: { message: 'bad key', code: 'AUTH' } } }])
+      },
+    } as never
+    const server = mount(failing, { ...CONFIG, rateLimitPerMinute: 100 })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { status } = await call(server, 'POST', JSON.stringify({ text: `失败${attempt}` }))
+        expect(status).toBe(502)
+      }
+      const blocked = await call(server, 'POST', JSON.stringify({ text: '再来一次' }))
+      expect(blocked.status).toBe(429)
+      expect(blocked.json).toMatchObject({ ok: false, error: { code: 'cooldown', params: { failures: 3 } } })
+      expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0)
+      // The breaker refuses before any model traffic: a stuck route must not
+      // keep paying for upstream calls while it cools down.
+      expect(calls).toBe(3)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('clears the failure streak on a success', async () => {
+    let calls = 0
+    const flaky = {
+      stream: (): AsyncIterable<StreamChunk> => {
+        calls += 1
+        // fail, fail, succeed, fail, fail, succeed, …
+        return calls % 3 === 0
+          ? streamOf(['结果'], [{ type: 'finish', reason: { kind: 'stop' } }])
+          : streamOf([], [{ type: 'finish', reason: { kind: 'error', failure: { message: 'boom', code: 'INTERNAL' } } }])
+      },
+    } as never
+    const server = mount(flaky, { ...CONFIG, rateLimitPerMinute: 100 })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const statuses: number[] = []
+      for (let attempt = 0; attempt < 6; attempt++) {
+        statuses.push((await call(server, 'POST', JSON.stringify({ text: `第${attempt}次` }))).status)
+      }
+      // Two failures then a success never reaches the streak limit, so no call
+      // in this sequence may be refused by the breaker.
+      expect(statuses).toEqual([502, 502, 200, 502, 502, 200])
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   it('answers 429 when the concurrency cap is full', async () => {
     let release!: () => void
     const gated = new Promise<void>((resolve) => { release = resolve })
@@ -575,5 +636,31 @@ describe('route registration', () => {
     apply(second.ctx as never, CONFIG)
     expect(first.captured).toHaveLength(1)
     expect(second.captured).toHaveLength(1)
+  })
+
+  it('re-mounts when the host replaces the webserver service', () => {
+    // A "already mounted" flag keyed on the context alone would leave the
+    // plugin alive with no route on the live service: the button renders and
+    // every click 404s. The registration follows the service identity instead.
+    const captured: CapturedRoute[] = []
+    let active = { register: (route: CapturedRoute): (() => void) => { captured.push(route); return () => {} } }
+    const ctx = {
+      effect: (): (() => void) => () => {},
+      get: (key: string): unknown => {
+        if (key === 'webServer') return active
+        if (key === 'llm') return makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }]))
+        return undefined
+      },
+      inject: (): void => {},
+      on: (): (() => void) => () => {},
+    }
+    apply(ctx as never, CONFIG)
+    expect(captured).toHaveLength(1)
+
+    const stale = active
+    active = { register: (route: CapturedRoute): (() => void) => { captured.push(route); return () => {} } }
+    apply(ctx as never, CONFIG)
+    expect(captured).toHaveLength(2)
+    expect(active).not.toBe(stale)
   })
 })

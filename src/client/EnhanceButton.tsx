@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } 
 import { createPortal } from 'react-dom'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { InputState } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { EnhanceError } from '../shared/protocol'
 import { checkInputText } from '../shared/validate'
 import { EnhanceClientError, requestEnhance, requestEnhanceStream } from './enhance-client'
@@ -28,9 +29,10 @@ export type EnhanceButtonProps = PropsRuntime<'conversation.input.right'> & Prop
  * Read the length of an optional array-shaped field out of the host's input
  * state.
  *
- * `imageIds` and `occurrences` are part of the conversation input snapshot in
- * the dsh lines this plugin was written against, but a slot host is not
- * obliged to expose them, and reading `.length` off a missing field throws
+ * Attachment ids are part of the conversation input snapshot in the dsh lines
+ * this plugin targets, but the field was RENAMED between generations
+ * (`imageIds` on the 0.1.x line, `attachmentIds` from 0.2.0 on) and a slot host
+ * is not obliged to expose either. Reading `.length` off a missing field throws
  * *during render* — which React answers by unmounting the whole slot entry
  * behind its error boundary, so the composer loses the button and the console
  * fills with a stack trace instead of a usable feature. Reading defensively
@@ -62,10 +64,15 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   // host id for UI keying when present, else a stable per-mount fallback.
   const uiKey = useSessionKey(sessionId, inputActions)
   const wireId = serverSessionId(sessionId)
-  const draft = useInput((state) => stringOf((state as { draft?: unknown }).draft))
-  const phase = useInput((state) => (state as { phase?: unknown }).phase)
-  const occurrenceCount = useInput((state) => countOf((state as { occurrences?: unknown }).occurrences))
-  const imageCount = useInput((state) => countOf((state as { imageIds?: unknown }).imageIds))
+  const draft = useInput((state: InputState) => stringOf((state as { draft?: unknown }).draft))
+  const phase = useInput((state: InputState) => (state as { phase?: unknown }).phase)
+  const occurrenceCount = useInput((state: InputState) => countOf((state as { occurrences?: unknown }).occurrences))
+  // `attachmentIds` is the 0.2.x field; `imageIds` is its 0.1.x predecessor.
+  // Both are read defensively so one binary serves both generations.
+  const attachmentCount = useInput((state: InputState) => {
+    const record = state as { attachmentIds?: unknown; imageIds?: unknown }
+    return countOf(record.attachmentIds) + countOf(record.imageIds)
+  })
   const settings = useSyncExternalStore(subscribeClientSettings, getClientSettings)
   const panel = useSyncExternalStore(ui.subscribe, ui.getPanel)
   const rootRef = useRef<HTMLButtonElement | null>(null)
@@ -90,9 +97,9 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
       ui.openError(uiKey, draft, { code: 'rejected', localized: disabled })
       return
     }
-    if (imageCount > 0 && draft.trim() === '') {
-      const imagesOnly = t('error.imagesOnly')
-      ui.openError(uiKey, draft, { code: 'rejected', localized: imagesOnly })
+    if (attachmentCount > 0 && draft.trim() === '') {
+      const attachmentsOnly = t('error.attachmentsOnly')
+      ui.openError(uiKey, draft, { code: 'rejected', localized: attachmentsOnly })
       return
     }
     const check = checkInputText(draft, settings.maxInputChars)
@@ -133,7 +140,7 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
       return
     }
     requestEnhance({ sessionId: wireId, text: draft }, controller.signal).then(settle, fail)
-  }, [anyBusy, draft, imageCount, occurrenceCount, phase, settings, uiKey, wireId, t])
+  }, [anyBusy, draft, attachmentCount, occurrenceCount, phase, settings, uiKey, wireId, t])
 
   // The session registry holds a stable identity; run always dispatches to
   // the latest start callback. The refresh rides an effect (never the render
