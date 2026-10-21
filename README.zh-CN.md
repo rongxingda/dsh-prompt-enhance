@@ -47,13 +47,13 @@ flowchart LR
 
 插件是单个 npm 包、双半区结构,完全遵循 dsh 插件规范:
 
-- **宿主半区**(`exports "."`,Node):注册 `prompt-enhance` 设置节(schemastery,由内置插件配置页自动渲染)、共享 webserver 上的 `POST /prompt-enhance/enhance` 路由(仅回环、限长),以及 `/enhance` 斜杠命令。模型调用走 `ctx.llm.stream` 并做规范化处理——与 harness 对会话标题相同的辅助调用纪律:超时与调用方取消在流过程中和结束后复查、终结 finish 校验、拒绝工具调用。
+- **宿主半区**(`exports "."`,Node):声明 `prompt-enhance` 设置 schema(schemastery,由内置插件配置页按加载器配置直接渲染,插件在**每次请求时**重新读取,而不是缓存启动快照),注册共享 webserver 上的 `POST /prompt-enhance/enhance` 路由(仅回环、限长),以及 `/enhance` 斜杠命令。模型调用走 `ctx.llm.stream` 并做规范化处理——与 harness 对会话标题相同的辅助调用纪律:超时与调用方取消在流过程中和结束后复查、终结 finish 校验、拒绝工具调用。
 - **浏览器半区**(`exports "./client"`):把增强按钮注册进 `conversation.input.right` 插槽、撤销条注册进 `conversation.input.dock` 插槽,绑定设置命名空间的实时镜像,并安装全局快捷键。全部文案经 harness locale 系统提供中英双语。
 
 ## 环境要求
 
 - `dsh >= 0.1.1-rc.2 < 0.3.0` —— 这个区间表示**实际验证过的范围**,而不是无限期的承诺。
-- 实测环境:`0.1.1-rc.2`、`0.1.2-alpha.3`、`0.1.7-rc.2`、`0.2.0-rc.2` 均已 boot 验证(插件层挂载、增强路由应答、客户端 bundle 构建通过;alpha 上走新版 `ctx.settings.installSection` 注册路径,`0.2.0-rc.2` 上还通过了运行时的插件兼容性闸门)。其中 `0.2.0-rc.2` 的验证包含 **dsh 桌面应用**——也就是本插件日常实际运行的环境。在 `0.2.x` 运行时上,可能会发现**别的**插件从界面消失:凡 `peerDependencies` 把 `@deepseek-ai/dsh-*` 锁在旧区间的 bundle 都会被闸门跳过(实测被跳过的是 `dshmarket`、`dsh-find-plugin`、`dsh-better-sidebar`)。宿主在插件用到的两处 API 上做过破坏性变更:`@deepseek-ai/dsh-settings` 的注册入口在两条早期版本线之间变了;`0.1.5-rc.3` 起 settings 服务改为 `SettingsForms`(不再有同步 `get`),同时 `dsh-agent-default-model` 把全局默认模型收进了自己的 `ctx.agentDefaultModel.currentSelection()` 服务。插件对三种形态均做运行时探测并自动适配,无需配置。
+- 实测环境:`0.1.1-rc.2`、`0.1.2-alpha.3`、`0.1.7-rc.2`、`0.2.0-rc.2`、**`0.2.1-rc.2`** 均已 boot 验证(插件层挂载、增强路由应答、客户端 bundle 构建通过;alpha 上走新版 `ctx.settings.installSection` 注册路径,`0.2.0-rc.2` 上还通过了运行时的插件兼容性闸门)。`0.2.1-rc.2` 的验证是**真实宿主的端到端冒烟**:在临时 profile 里装入本地构建后,增强路由对着在线模型返回了真实结果;把该 profile 的 `maxInputChars` 设为 `300` 后,400 字草稿被 `422 {count:400,max:300}` 拒绝,随后**不重启**把它改成 `20000`,同一份草稿立即通过——设置改动确实作用到下一次请求,而不是停在启动时的快照。其中 `0.2.0-rc.2` 的验证包含 **dsh 桌面应用**——也就是本插件日常实际运行的环境。在 `0.2.x` 运行时上,可能会发现**别的**插件从界面消失:凡 `peerDependencies` 把 `@deepseek-ai/dsh-*` 锁在旧区间的 bundle 都会被闸门跳过(实测被跳过的是 `dshmarket`、`dsh-find-plugin`、`dsh-better-sidebar`)。宿主在插件用到的几处 API 上做过破坏性变更:`@deepseek-ai/dsh-settings` 的注册入口在两条早期版本线之间变过,`0.1.5-rc.3` 起 settings 服务改为 `SettingsForms`(不再有同步 `get`),而 `0.2.x` 干脆**删掉了 `installSettingsSection` / `settingsNamespace` 导出**;`dsh-agent-default-model` 把全局默认模型收进了自己的 `ctx.agentDefaultModel.currentSelection()` 服务;浏览器侧的设置镜像则从 `ctx.settingsScope` 迁到了 `ctx.configForms`。插件对每一代形态均做运行时探测并自动适配,无需配置。
 - 上界覆盖整条 `0.2.x` 线(含其预发布版本);`0.3.x` 尚未验证,因此不在区间内。`dsh.engines` 是加载器与插件管理器读取的**声明性元数据**——它表达支持范围,并不强制拦截。
 - Node `^22.19.0 || >=24.0.0`(仅从源码构建时需要)
 - 浏览器侧 peer `react` / `react-dom`(`^18.2.0`)由 Web 壳的模块注册表提供。宿主半区用到的 `@deepseek-ai/dsh-llm` 是**由 dsh 宿主提供的运行时模块,不从 npm 安装**(`lib/` 产物把包引用全部保持为外部),因此声明为**可选** peer:未提供它的环境不会出现安装警告,增强时按正常错误路径报错,而不是加载失败。
