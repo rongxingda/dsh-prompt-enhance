@@ -2,6 +2,16 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); releases from **0.2.3** onward also have a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes (0.2.0–0.2.2 are tagged but have no Release page — see this file for their notes).
 
+## 0.3.2 (2026-10-22)
+
+Closes the last item 0.3.1 listed as deliberately out of scope, in the smallest shape that actually shuts the hole: the loopback fence compared an `Origin`'s **hostname** against the allowlist but never its **port**. Any page served by any other local server — a dev tool on `localhost:4000`, a playground, a docs preview — therefore counted as a same-app page and could POST a draft to `/prompt-enhance/enhance`, spending the operator's model quota through a route the page has no business reaching. The port is now pinned to the one the request was addressed to, read off the `Host` header, with the scheme default standing in when either side leaves it out (`http://localhost` ≡ `localhost:80`).
+
+The fallback is deliberate and narrow: a `Host` header naming no port — a default-port server, or an HTTP/1.0-style client sending no `Host` at all — leaves nothing to pin against, so the hostname-only verdict stands exactly as it did in 0.3.1. That was never a new gap; it is the same trust boundary, now stated in the function rather than merely implied by the code.
+
+While in there, one real false negative: `URL.hostname` keeps the square brackets on IPv6 literals and the allowlist does not, so `Origin: http://[::1]:3080` was refused even though `Host: [::1]:3080` was trusted. Refusing is the safe direction, but it is still a defect — on an IPv6-only loopback host the served page could never call the route at all. Brackets are stripped before the comparison now.
+
+Verification: three new unit cases plus one end-to-end 403 through a real listening server; **all four fail against the 0.3.1 code** (including the IPv6 case) and pass here. Suite: **24 files / 246 cases green** (was 242); `lib/` rebuilt; typecheck clean.
+
 ## 0.3.1 (2026-10-22)
 
 Fixes the two defects the 0.3.0 settings rewrite did not actually reach — the config page never appeared, and a failed stream never closed — plus a lifetime bug in the route and four smaller failure-path gaps. Both headline items are the "looks present, is not working" kind, so each ships with a test that fails on the old code.
