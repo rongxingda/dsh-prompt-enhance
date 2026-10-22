@@ -4,7 +4,9 @@ All notable changes are documented here. Versions follow [npm](https://www.npmjs
 
 ## 0.3.2 (2026-10-22)
 
-Closes the last item 0.3.1 listed as deliberately out of scope, in the smallest shape that actually shuts the hole: the loopback fence compared an `Origin`'s **hostname** against the allowlist but never its **port**. Any page served by any other local server — a dev tool on `localhost:4000`, a playground, a docs preview — therefore counted as a same-app page and could POST a draft to `/prompt-enhance/enhance`, spending the operator's model quota through a route the page has no business reaching. The port is now pinned to the one the request was addressed to, read off the `Host` header, with the scheme default standing in when either side leaves it out (`http://localhost` ≡ `localhost:80`).
+Closes the last item 0.3.1 listed as deliberately out of scope: the loopback fence compared an `Origin`'s **hostname** against the allowlist but never its **port**, so a page served by any other local server — a dev tool on `localhost:4000`, a playground, a docs preview — was *admitted* by the fence as a same-app page.
+
+That was never a live exploit, and saying so matters: a browser page still had to clear a CORS preflight against a route that answers `OPTIONS` with `405` and sets no `Access-Control-Allow-Origin`, and then the route's `application/json` gate (`415` otherwise). Both barriers happen to stand, and neither is an authentication control this code owns. A fence whose verdict is only safe because two unrelated checks sit behind it is not a fence; the port is now pinned to the one the request was addressed to, read off the `Host` header, with the scheme default standing in when either side leaves it out (`http://localhost` ≡ `localhost:80`).
 
 The fallback is deliberate and narrow: a `Host` header naming no port — a default-port server, or an HTTP/1.0-style client sending no `Host` at all — leaves nothing to pin against, so the hostname-only verdict stands exactly as it did in 0.3.1. That was never a new gap; it is the same trust boundary, now stated in the function rather than merely implied by the code.
 
