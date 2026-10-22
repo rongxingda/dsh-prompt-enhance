@@ -57,6 +57,29 @@ interface SlotsFace {
 // renders dictionary keys instead of copy.
 export const inject: string[] = []
 
+/**
+ * Report one failed optional wiring step and keep booting.
+ *
+ * The policy is catch-and-never-throw — a throw from `apply` fails the whole
+ * web boot — but a silent catch made every "the button is not there" report
+ * undebuggable: nothing in the browser console, nothing in the host log, and
+ * the failure mode is indistinguishable from "this profile does not bundle
+ * the service". Log one bounded line per failure and still hand back a no-op
+ * disposer so callers stay uniform.
+ * @param step - the wiring step that failed, named as the user sees it.
+ * @param error - the thrown value, logged as-is.
+ * @returns a no-op disposer.
+ */
+function report(step: string, error: unknown): () => void {
+  try {
+    console.warn(`[prompt-enhance] ${step} failed; that feature stays off.`, error)
+  } catch {
+    // A throwing console (a proxied one, or a locked-down shell) must not turn
+    // a degraded feature into a failed boot.
+  }
+  return () => {}
+}
+
 /** Apply the browser half. */
 export function apply(ctx: ClientContext): void {
   ensureStyles()
@@ -68,8 +91,8 @@ export function apply(ctx: ClientContext): void {
     ctx.effect(() => {
       try {
         return localeCtx.locale.register(NS, dictionaries)
-      } catch {
-        return () => {}
+      } catch (error) {
+        return report('dictionary registration', error)
       }
     }, 'dsh-prompt-enhance: dictionaries')
   })
@@ -97,8 +120,8 @@ export function apply(ctx: ClientContext): void {
           { name: 'conversation.input.right', id: 'prompt-enhance', order: 60, locale: NS },
           EnhanceButton as unknown as never,
         )
-      } catch {
-        return () => {}
+      } catch (error) {
+        return report('composer enhance button slot', error)
       }
     })
   })
@@ -112,8 +135,8 @@ export function apply(ctx: ClientContext): void {
           { name: 'conversation.input.dock', id: 'prompt-enhance-undo', order: 90, locale: NS },
           UndoBar as unknown as never,
         )
-      } catch {
-        return () => {}
+      } catch (error) {
+        return report('undo bar slot', error)
       }
     })
   })
@@ -123,7 +146,13 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.isComposing) return
-      const combo = parseShortcut(getClientSettings().shortcut)
+      const settings = getClientSettings()
+      // Master switch off means this plugin has no claim on the keyboard. The
+      // old code still matched, prevented the default and ran a no-op target,
+      // so turning the plugin off silently broke whichever host shortcut the
+      // user had bound to the same combo, with nothing to explain it.
+      if (!settings.enabled) return
+      const combo = parseShortcut(settings.shortcut)
       if (!matchesShortcut(event, combo)) return
       const target = ui.shortcutTarget()
       if (target === undefined) return

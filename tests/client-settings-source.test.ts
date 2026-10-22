@@ -161,6 +161,33 @@ describe('installClientSettingsSource: configForms (dsh 0.2.x)', () => {
     expect(early.listeners).toHaveLength(0)
   })
 
+  it('retries the lookup instead of burning the id on a form that is not ready', () => {
+    // Recording the id before the lookup made a transient `undefined` permanent:
+    // every later describe tick short-circuited on `entryId === boundId`, so the
+    // mirror stayed on its bundled defaults for the rest of the session.
+    const fake = fakeForm({ enabled: false, maxInputChars: 3210 })
+    const listeners: (() => void)[] = []
+    let ready = false
+    const forms = {
+      get: (): unknown => (ready ? fake.form : undefined),
+      describe: (): unknown => ({
+        getSnapshot: () => ({ view: { namespaces: [{ ns: 'prompt-enhance' }] } }),
+        subscribe: (listener: () => void): (() => void) => {
+          listeners.push(listener)
+          return () => {}
+        },
+      }),
+    }
+    const { ctx } = contextWith({ configForms: forms })
+    const onSection = vi.fn()
+    installClientSettingsSource(ctx, options(onSection))
+    expect(onSection).not.toHaveBeenCalled()
+
+    ready = true
+    for (const listener of [...listeners]) listener()
+    expect(onSection).toHaveBeenCalledWith({ enabled: false, maxInputChars: 3210 })
+  })
+
   it('does not rebind while the served id is unchanged', () => {
     const fake = fakeForm({ enabled: true })
     const seen: string[] = []

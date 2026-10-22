@@ -89,12 +89,35 @@ async function readEnvelope(response: Response): Promise<EnhanceResult> {
   throw new EnhanceClientError({ code: 'internal', message: `宿主服务返回异常（HTTP ${response.status}）。` })
 }
 
+/**
+ * Turn a non-2xx reply into the error the host actually meant.
+ *
+ * A refused request is not a missing stream. The route answers 429 for the
+ * rate/concurrency/cooldown cases, 409 for an unconfigured model, 422 for a
+ * rejected draft and 5xx for upstream failures — and every one of those
+ * carries a structured envelope naming the reason. Retrying it as if the
+ * transport were at fault spends the user's quota a second time and replaces
+ * the real reason with whatever the retry happens to fail with.
+ * @param response - the refused response (its body is consumed here).
+ * @returns the displayable error, falling back to the status code.
+ */
+async function rejectionOf(response: Response): Promise<EnhanceClientError> {
+  try {
+    const parsed = await response.json() as { error?: unknown } | null
+    if (parsed !== null && typeof parsed === 'object' && parsed.error !== undefined) {
+      return new EnhanceClientError(parseError(parsed.error))
+    }
+  } catch {
+    // Not the JSON envelope (proxy error page, empty body): fall through.
+  }
+  return new EnhanceClientError({ code: 'internal', message: `宿主服务拒绝了请求（HTTP ${response.status}），请稍后重试。` })
+}
+
 /** One SSE frame: the event name line and the `data:` payload line. */
 interface StreamFrame {
   event: string
   data: string
 }
-
 /** Split one buffer into complete SSE frames; the remainder stays buffered. */
 function takeFrames(buffer: string): { frames: StreamFrame[]; rest: string } {
   const frames: StreamFrame[] = []
@@ -166,11 +189,13 @@ export async function requestEnhanceStream(body: EnhanceRequestBody, options: En
     throw new EnhanceClientError({ code: 'internal', message: '无法连接宿主服务，请确认 dsh web 正在运行后重试。' })
   }
   const contentType = String(response.headers.get('content-type') ?? '').toLowerCase()
+  // A refusal is the server answering, not a missing stream: report it as-is
+  // instead of discarding the envelope and re-sending the same request.
+  if (!response.ok) throw await rejectionOf(response)
   const stream = response.body
-  const streamable = response.ok && stream !== null && stream !== undefined && contentType.includes('event-stream')
-  if (stream === null || stream === undefined || !streamable) {
-    // Not a stream (old host, buffered proxy, or a rejection that predates
-    // the stream): release the body and take the one-shot path instead.
+  if (stream === null || stream === undefined || !contentType.includes('event-stream')) {
+    // Not a stream (old host, buffered proxy): release the body and take the
+    // one-shot path instead.
     // `cancel()` may return a promise in some runtimes and undefined in
     // others, so wrap before catching rather than assuming a promise.
     void Promise.resolve().then(() => stream?.cancel()).catch(() => {})

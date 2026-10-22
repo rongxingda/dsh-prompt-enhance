@@ -149,13 +149,6 @@ export function installClientSettingsSource(ctx: ClientContext, options: ClientS
     const bind = (): void => {
       const entryId = resolveEntryId()
       if (entryId === undefined || entryId === boundId) return
-      try {
-        unsubscribeForm?.()
-      } catch {
-        // Already released with the service.
-      }
-      unsubscribeForm = undefined
-      boundId = entryId
       let form: BoundFormLike | undefined
       try {
         form = forms.get?.(entryId)
@@ -163,6 +156,20 @@ export function installClientSettingsSource(ctx: ClientContext, options: ClientS
         return
       }
       if (form === undefined) return
+      // Only a form that actually came back may claim the id. Recording the id
+      // before the lookup let a `get()` that was not ready yet burn it: every
+      // later describe tick then short-circuited on `entryId === boundId`, so
+      // the mirror stayed on its bundled defaults for the rest of the session
+      // — the exact failure this module exists to prevent. The live
+      // subscription is swapped only once a replacement exists, for the same
+      // reason: dropping it on a failed lookup leaves nothing to retry from.
+      try {
+        unsubscribeForm?.()
+      } catch {
+        // Already released with the service.
+      }
+      unsubscribeForm = undefined
+      boundId = entryId
       adoptSnapshot(RANK.configForms, form)
       try {
         unsubscribeForm = form.subscribe?.(() => adoptSnapshot(RANK.configForms, form as BoundFormLike))

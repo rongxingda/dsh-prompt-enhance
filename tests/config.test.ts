@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, effectiveSystemPrompt, resolveConfig } from '../src/config'
+import { Config, DEFAULT_CONFIG, effectiveSystemPrompt, resolveConfig } from '../src/config'
 import { DEFAULT_SYSTEM_PROMPT } from '../src/prompts'
+
+describe('Config schema', () => {
+  it('marks every field volatile so the settings page exists at all', () => {
+    // Not cosmetic: the host builds the config page by projecting each entry
+    // through its internal `volatileForm()`, which returns undefined — and
+    // drops the whole entry — when no field carries `meta.volatile`. The
+    // visible symptom is a missing config page; the sharp one is that a write
+    // against such an entry throws `Plugin entry "…" has no volatile fields`.
+    const fields = Object.entries(Config.dict ?? {})
+    expect(fields.length).toBeGreaterThan(0)
+    const notVolatile = fields.filter(([, field]) => (field as { meta: { volatile?: boolean } }).meta.volatile !== true).map(([key]) => key)
+    expect(notVolatile).toEqual([])
+  })
+
+  it('covers every documented default, plus the optional route pair', () => {
+    // `provider`/`model` carry no default on purpose: absent means "follow the
+    // session's model", which is different from an empty override.
+    const fields = Object.keys(Config.dict ?? {})
+    for (const key of Object.keys(DEFAULT_CONFIG)) expect(fields).toContain(key)
+    expect(fields).toContain('provider')
+    expect(fields).toContain('model')
+  })
+})
 
 describe('resolveConfig', () => {
   it('passes a paired provider/model override', () => {

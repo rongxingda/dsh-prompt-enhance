@@ -250,6 +250,15 @@ export function shortcutTarget(): (() => void) | undefined {
     // The composer card sits within a handful of levels above the textarea;
     // stopping here keeps a settings-page focus from matching via <body>.
     for (let depth = 0; depth < 8 && node !== null; depth++) {
+      // `<body>` (and the root element) contain every session's composer, so
+      // `contains` stops discriminating there: the first entry in the map
+      // would win regardless of which session the user is in. That is not
+      // hypothetical — the result panel is portaled onto `body` and takes
+      // focus, so with the panel open every shortcut press was routed to
+      // whichever session happened to register first. Stop before the walk
+      // reaches a node that would match everyone and let the
+      // most-recently-mounted fallback decide instead.
+      if (node === document.body || node === document.documentElement) break
       for (const entry of sessions.values()) {
         if (entry.root !== null && (node === entry.root || node.contains(entry.root))) {
           const found = entry

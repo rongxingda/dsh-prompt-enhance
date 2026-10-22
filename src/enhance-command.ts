@@ -38,15 +38,20 @@ export function registerEnhanceCommand(ctx: Context, readConfig: () => Config): 
       if (raw === '') {
         return { kind: 'error', text: '用法：/enhance <文本>。要增强输入框里的草稿，请用输入框右侧的「增强」按钮或快捷键。' }
       }
-      const config = readConfig()
-      if (!config.enabled) {
-        return { kind: 'error', text: '提示词增强已在插件设置中关闭。' }
-      }
-      const check = checkInputText(raw, config.maxInputChars)
-      if (!check.ok) {
-        return { kind: 'error', text: formatInputCheckZh(check) }
-      }
+      // Everything below reads config, and `resolveConfig` throws on the
+      // invariants the schema cannot express (provider without model, an
+      // out-of-range value left by hand-editing). Reading it outside the try
+      // turned those into an uncaught handler throw — the user got a raw
+      // exception instead of the bilingual message the route already shows.
       try {
+        const config = readConfig()
+        if (!config.enabled) {
+          return { kind: 'error', text: '提示词增强已在插件设置中关闭。' }
+        }
+        const check = checkInputText(raw, config.maxInputChars)
+        if (!check.ok) {
+          return { kind: 'error', text: formatInputCheckZh(check) }
+        }
         const value = await runEnhance(ctx, config, {
           text: raw,
           sessionRoute: sessionRouteOf(ctx, invocation.agent.session.id),

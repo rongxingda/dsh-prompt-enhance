@@ -16,7 +16,7 @@ import { type Config } from './config'
 import { toEnhanceError } from './enhancer'
 import { runEnhance, sessionRouteOf } from './orchestrate'
 import { isTrustedRequest } from './loopback'
-import { readBoundedJson, writeJson } from './http'
+import { readBoundedJson, writeJson, endResponse } from './http'
 
 /** Envelope slack over the UTF-8 text cap: JSON quoting can inflate ~2-6x in the worst case. */
 const bodyCapOf = (maxInputChars: number): number => maxInputChars * 6 + 4096
@@ -240,15 +240,7 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
         // client survives only because it returns on the `done` frame and
         // cancels the reader, but any whole-body reader (`response.text()`, a
         // curl, a proxy) waits forever, and the socket can never be reused.
-        // Guarded because a client that vanished mid-stream leaves a dead
-        // socket, where ending would throw and mask the real outcome.
-        if (!res.writableEnded && !res.destroyed) {
-          try {
-            res.end()
-          } catch {
-            // Half-closed socket: there is nothing left to terminate.
-          }
-        }
+        endResponse(res)
       } finally {
         // Always release the transport listener, success or failure.
         sse.dispose()
@@ -274,8 +266,19 @@ async function serveEnhance(ctx: Context, readConfig: () => Config, gate: Admiss
     }
     const wire = toEnhanceError(error)
     if (stream && res.headersSent) {
-      // Headers are already out: the failure has to ride the same stream.
-      if (!res.writableEnded) res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: wire })}\n\n`)
+      // Headers are already out: the failure has to ride the same stream, and
+      // the stream has to be closed the same way the success path closes it.
+      // Writing the `error` frame alone leaves the chunked body unterminated —
+      // the frame reaches a browser (which acts on it), while a whole-body
+      // reader keeps waiting for the closing chunk that never comes.
+      if (!res.writableEnded) {
+        try {
+          res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: wire })}\n\n`)
+        } catch {
+          // Socket already gone: the write is moot, the end below still applies.
+        }
+      }
+      endResponse(res)
     } else {
       writeJson(res, wire.code === 'timeout' ? 504 : wire.code === 'unconfigured' ? 409 : 502, { ok: false, error: wire })
     }
@@ -305,37 +308,70 @@ interface RouteMount {
 const mounts = new WeakMap<Context, RouteMount>()
 
 /**
- * Register the /prompt-enhance prefix route on the shared webserver. Absent
- * webserver (non-web composition) is a silent no-op, matching the
- * describe-image family pattern. A second registration on the same context is
- * ignored.
- * @param ctx - registrant context; webServer is required.
+ * Register the /prompt-enhance prefix route on the shared webserver.
+ *
+ * Two lifetime rules, both learned the hard way:
+ *
+ * 1. The webserver is a *dependency*, not something to snapshot. Reading it
+ *    once at apply time would leave the plugin routeless in any composition
+ *    that loads the webserver later, and would keep serving from a dead
+ *    service after the host rebuilds it. `ctx.inject` scopes a child fiber to
+ *    the service, so this block re-runs on replacement and is torn down when
+ *    the service goes away.
+ * 2. The registration must live exactly as long as that fiber.
+ *    `webServer.register` only hands back a "drop from the table" function; the
+ *    service does not reclaim it on unload. Left to a module-level map, an
+ *    unloaded plugin keeps answering requests with a stale config reader and a
+ *    stale admission gate, and a reload throws `duplicate prefix route`.
+ *    `ctx.effect` is what actually reclaims it.
+ *
+ * @param ctx - registrant context.
  * @param readConfig - per-request config reader so settings changes apply immediately.
  */
 export function registerEnhanceRoute(ctx: Context, readConfig: () => Config): void {
-  const webserver = ctx.get('webServer') as unknown as {
-    register(route: unknown): unknown
-  } | undefined
-  if (webserver === undefined) return
-  const existing = mounts.get(ctx)
-  if (existing !== undefined && existing.webserver === webserver) return
-  if (existing !== undefined) {
-    // The service was rebuilt: drop the stale registration (it belongs to a
-    // webserver that no longer serves) and mount on the live one.
-    try {
-      existing.dispose()
-    } catch {
-      // Already torn down with the old service.
+  ctx.inject(['webServer'], (routeCtx: Context) => {
+    const webserver = routeCtx.get('webServer') as unknown as {
+      register(route: unknown): unknown
+    } | undefined
+    if (webserver === undefined) return
+    const existing = mounts.get(ctx)
+    // Already mounted on this very service (a second apply on a live fiber, or
+    // a re-link): a second registration would also double the effective rate
+    // and concurrency limits, which is exactly the drift a reload must not add.
+    if (existing !== undefined && existing.webserver === webserver) return
+    if (existing !== undefined) {
+      // The service was rebuilt: drop the stale registration (it belongs to a
+      // webserver that no longer serves) and mount on the live one.
+      try {
+        existing.dispose()
+      } catch {
+        // Already torn down with the old service.
+      }
+      mounts.delete(ctx)
     }
-  }
-  const gate: AdmissionGate = { stamps: [], active: 0, failures: 0, cooldownUntil: 0 }
-  const dispose = webserver.register({
-    kind: 'prefix',
-    path: ENHANCE_PREFIX,
-    handler: (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-      const pathname = new URL(req.url ?? '/', 'http://x').pathname
-      return serveEnhance(ctx, readConfig, gate, pathname, req, res, pathname === ENHANCE_STREAM_ENDPOINT)
-    },
+    const gate: AdmissionGate = { stamps: [], active: 0, failures: 0, cooldownUntil: 0 }
+    routeCtx.effect(() => {
+      const dispose = webserver.register({
+        kind: 'prefix',
+        path: ENHANCE_PREFIX,
+        handler: (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+          const pathname = new URL(req.url ?? '/', 'http://x').pathname
+          return serveEnhance(ctx, readConfig, gate, pathname, req, res, pathname === ENHANCE_STREAM_ENDPOINT)
+        },
+      })
+      const disposed = typeof dispose === 'function' ? dispose as () => void : (): void => {}
+      mounts.set(ctx, { webserver, dispose: disposed })
+      return (): void => {
+        // Only the owner clears the record: after a service swap a newer mount
+        // may already own it, and deleting that would make the next apply
+        // register a duplicate on a live table.
+        if (mounts.get(ctx)?.dispose === disposed) mounts.delete(ctx)
+        try {
+          disposed()
+        } catch {
+          // Already torn down with the old service.
+        }
+      }
+    }, 'prompt-enhance: enhance route')
   })
-  mounts.set(ctx, { webserver, dispose: typeof dispose === 'function' ? dispose as () => void : () => {} })
 }

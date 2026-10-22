@@ -5,7 +5,7 @@
  * @module dsh-prompt-enhance/config
  */
 
-import z from 'schemastery'
+import z from '@deepseek-ai/schemastery'
 
 /** Settings namespace of the plugin section. */
 export const PROMPT_ENHANCE_NAMESPACE = 'prompt-enhance'
@@ -85,31 +85,42 @@ export const DEFAULT_CONFIG: Config = {
 /**
  * The settings section schema (rendered by the built-in plugin config page).
  *
- * Deliberately left to inference instead of annotated `z<Config>`: on the
- * schemastery line bundled with dsh 0.2.x the object schema's `meta.default`
- * carries `Volatile<…>` variants that are not assignable to a plain `Config`
- * default type, so an explicit annotation rejects an otherwise valid schema.
- * The runtime contract (a schemastery schema the loader renders) is what
- * matters here; the interface above stays the compile-time shape of the
- * values this plugin reads.
+ * Every field is marked `.volatile()`, and that mark is load-bearing, not
+ * decoration: the host builds the config page from `SettingsForms.describe()`,
+ * which projects each entry through its internal `volatileForm()` and **drops
+ * the entire entry** when no field carries `meta.volatile`. A schema without
+ * it therefore renders no page at all, and a write against it throws
+ * `Plugin entry "…" has no volatile fields`. Marking a field volatile is also
+ * a promise that the plugin re-reads it without a remount — which is exactly
+ * what this one does (`apply` hands every request a `readConfig()` closure).
+ *
+ * Deliberately left to inference instead of annotated `z<Config>`: the object
+ * schema's `meta.default` carries `Volatile<…>` variants that are not
+ * assignable to a plain `Config` default type, so an explicit annotation
+ * rejects an otherwise valid schema. The runtime contract (a schemastery
+ * schema the loader renders) is what matters here; the interface above stays
+ * the compile-time shape of the values this plugin reads.
+ *
+ * Imported from `@deepseek-ai/schemastery`, not the plain `schemastery`: only
+ * the fork carries `.volatile()` (and the placement checks that go with it).
  */
 export const Config = z.object({
-  enabled: z.boolean().default(DEFAULT_CONFIG.enabled).description('总开关：关闭后隐藏输入框增强按钮并停用所有触发方式'),
-  provider: z.string().description('覆盖模型路由的 provider（与「模型」必须成对填写；留空跟随当前会话模型）'),
-  model: z.string().description('覆盖模型路由的 model（与「provider」必须成对填写；留空跟随当前会话模型）'),
-  temperature: z.number().min(0).max(1).step(0.05).default(DEFAULT_CONFIG.temperature).description('采样温度；低温改写更忠实于原意'),
-  maxOutputTokens: z.number().step(1).min(256).max(32768).default(DEFAULT_CONFIG.maxOutputTokens).description('单次增强的输出 token 上限'),
-  maxInputChars: z.number().step(1).min(200).max(200000).default(DEFAULT_CONFIG.maxInputChars).description('输入字数上限；超限拒绝而不截断，避免改变原意'),
-  timeoutMs: z.number().step(1).min(5000).max(600000).default(DEFAULT_CONFIG.timeoutMs).description('单次增强的超时（毫秒）'),
-  systemPrompt: z.string().role('textarea').default(DEFAULT_CONFIG.systemPrompt).description('系统提示词；留空使用内置增强策略'),
-  strategyMode: z.union(['replace-default', 'extend-default']).default(DEFAULT_CONFIG.strategyMode).description('自定义系统提示词的组合方式：整体替换内置策略（默认；内置策略的不编造、只输出正文等硬性约束不会自动保留），或把自定义文本追加在内置策略之后（硬性约束继续生效）'),
-  shortcut: z.string().default(DEFAULT_CONFIG.shortcut).description('触发快捷键（如 ctrl+alt+e；须包含 ctrl/alt/meta 中至少一个修饰键，shift 仅可作附加，纯字母/数字或 shift+字母会被忽略；留空禁用）'),
-  maxConcurrent: z.number().step(1).min(1).max(16).default(DEFAULT_CONFIG.maxConcurrent).description('宿主侧并发上限：同时进行的增强调用数，超出的请求返回 429'),
-  rateLimitPerMinute: z.number().step(1).min(1).max(600).default(DEFAULT_CONFIG.rateLimitPerMinute).description('每分钟增强次数上限（滑动窗口），超出返回 429'),
-  streaming: z.boolean().default(DEFAULT_CONFIG.streaming).description('增量展示：模型边写边在面板显示（仅影响显示节奏，最终结果不变；宿主或网络不支持时自动回退为一次性返回）'),
-  contextAware: z.boolean().default(DEFAULT_CONFIG.contextAware).description('上下文感知：读取当前会话近期对话，用于消解指代、补全省略与术语约束；无历史或历史不足时自动回退为单条增强，不臆造信息'),
-  contextMaxMessages: z.number().step(1).min(0).max(50).default(DEFAULT_CONFIG.contextMaxMessages).description('上下文窗口（条数）：最多参考最近多少条 user/assistant 轮次；0 表示不参考'),
-  contextMaxChars: z.number().step(1).min(0).max(100000).default(DEFAULT_CONFIG.contextMaxChars).description('上下文窗口（字数）：历史片段的字符预算，从最新一条向前装配；0 表示不参考'),
+  enabled: z.boolean().default(DEFAULT_CONFIG.enabled).description('总开关：关闭后隐藏输入框增强按钮并停用所有触发方式').volatile(),
+  provider: z.string().description('覆盖模型路由的 provider（与「模型」必须成对填写；留空跟随当前会话模型）').volatile(),
+  model: z.string().description('覆盖模型路由的 model（与「provider」必须成对填写；留空跟随当前会话模型）').volatile(),
+  temperature: z.number().min(0).max(1).step(0.05).default(DEFAULT_CONFIG.temperature).description('采样温度；低温改写更忠实于原意').volatile(),
+  maxOutputTokens: z.number().step(1).min(256).max(32768).default(DEFAULT_CONFIG.maxOutputTokens).description('单次增强的输出 token 上限').volatile(),
+  maxInputChars: z.number().step(1).min(200).max(200000).default(DEFAULT_CONFIG.maxInputChars).description('输入字数上限；超限拒绝而不截断，避免改变原意').volatile(),
+  timeoutMs: z.number().step(1).min(5000).max(600000).default(DEFAULT_CONFIG.timeoutMs).description('单次增强的超时（毫秒）').volatile(),
+  systemPrompt: z.string().role('textarea').default(DEFAULT_CONFIG.systemPrompt).description('系统提示词；留空使用内置增强策略').volatile(),
+  strategyMode: z.union(['replace-default', 'extend-default']).default(DEFAULT_CONFIG.strategyMode).description('自定义系统提示词的组合方式：整体替换内置策略（默认；内置策略的不编造、只输出正文等硬性约束不会自动保留），或把自定义文本追加在内置策略之后（硬性约束继续生效）').volatile(),
+  shortcut: z.string().default(DEFAULT_CONFIG.shortcut).description('触发快捷键（如 ctrl+alt+e；须包含 ctrl/alt/meta 中至少一个修饰键，shift 仅可作附加，纯字母/数字或 shift+字母会被忽略；留空禁用）').volatile(),
+  maxConcurrent: z.number().step(1).min(1).max(16).default(DEFAULT_CONFIG.maxConcurrent).description('宿主侧并发上限：同时进行的增强调用数，超出的请求返回 429').volatile(),
+  rateLimitPerMinute: z.number().step(1).min(1).max(600).default(DEFAULT_CONFIG.rateLimitPerMinute).description('每分钟增强次数上限（滑动窗口），超出返回 429').volatile(),
+  streaming: z.boolean().default(DEFAULT_CONFIG.streaming).description('增量展示：模型边写边在面板显示（仅影响显示节奏，最终结果不变；宿主或网络不支持时自动回退为一次性返回）').volatile(),
+  contextAware: z.boolean().default(DEFAULT_CONFIG.contextAware).description('上下文感知：读取当前会话近期对话，用于消解指代、补全省略与术语约束；无历史或历史不足时自动回退为单条增强，不臆造信息').volatile(),
+  contextMaxMessages: z.number().step(1).min(0).max(50).default(DEFAULT_CONFIG.contextMaxMessages).description('上下文窗口（条数）：最多参考最近多少条 user/assistant 轮次；0 表示不参考').volatile(),
+  contextMaxChars: z.number().step(1).min(0).max(100000).default(DEFAULT_CONFIG.contextMaxChars).description('上下文窗口（字数）：历史片段的字符预算，从最新一条向前装配；0 表示不参考').volatile(),
 })
 
 /**

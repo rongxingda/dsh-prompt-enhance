@@ -46,22 +46,31 @@ function streamOf(parts: string[], finish: StreamChunk[]): AsyncIterable<StreamC
 interface StubContext {
   ctx: unknown
   captured: CapturedRoute[]
+  /** Run every `ctx.effect` cleanup, as a plugin unload would. */
+  disposeAll: () => void
+  /** How many times a registered route handed its disposer back. */
+  routeDisposals: () => number
 }
 
 /** Build a stub context exposing the services the plugin half reads. */
 function stubContext(llm: ReturnType<typeof makeLlm>): StubContext {
   const captured: CapturedRoute[] = []
+  const cleanups: (() => void)[] = []
+  let routeDisposals = 0
   // One stable service object per context, exactly like cordis: the plugin
   // compares service identity to decide whether a re-apply must re-mount.
   const webserver = {
     register(route: CapturedRoute): () => void {
       captured.push(route)
-      return () => {}
+      return () => {
+        routeDisposals += 1
+      }
     },
   }
-  const ctx = {
+  const ctx: Record<string, unknown> = {
     effect(fn: () => unknown): () => void {
-      fn()
+      const dispose = fn()
+      if (typeof dispose === 'function') cleanups.push(dispose as () => void)
       return () => {}
     },
     get(key: string): unknown {
@@ -71,13 +80,24 @@ function stubContext(llm: ReturnType<typeof makeLlm>): StubContext {
       if (key === 'settings') return { get: (): unknown => ({ provider: 'zhipu', model: 'glm-5.3' }) }
       return undefined
     },
-    inject(): void {},
+    // cordis runs the callback in a child fiber once the deps resolve; the
+    // stub resolves them immediately against the same context.
+    inject(_deps: string[], callback: (child: unknown) => void): void {
+      callback(ctx)
+    },
     emit(): void {},
     on(): () => void {
       return () => {}
     },
   }
-  return { ctx, captured }
+  return {
+    ctx,
+    captured,
+    disposeAll: (): void => {
+      for (const cleanup of cleanups.splice(0)) cleanup()
+    },
+    routeDisposals: (): number => routeDisposals,
+  }
 }
 
 /** Mount apply() against a stub context and expose the route over real HTTP. */
@@ -602,6 +622,35 @@ describe('POST /prompt-enhance/enhance-stream (real http, SSE)', () => {
     }
   })
 
+  it('closes the stream when the model fails mid-flight', async () => {
+    // Regression guard for an unterminated failure stream. The success path
+    // ended the response from the start; the failure path only wrote the
+    // `error` frame and left the chunked body open, which a browser masks (it
+    // acts on the frame and cancels) but a whole-body reader never survives.
+    // If the close goes missing again, reading this body never finishes and
+    // the 2 s abort in `callStream` turns the gap into a failure here.
+    const failing = makeLlm(
+      () =>
+        (async function* (): AsyncGenerator<StreamChunk> {
+          yield { type: 'block-start', index: 0, blockType: 'text' }
+          yield { type: 'text-delta', index: 0, text: '半句' }
+          throw new Error('upstream reset')
+        })(),
+    )
+    const server = mount(failing)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { status, contentType, body } = await callStream(server, '写个爬虫')
+      expect(status).toBe(200)
+      expect(contentType).toContain('text/event-stream')
+      const frames = framesOf(body)
+      expect(frames.filter((frame) => frame.event === 'error')).toHaveLength(1)
+      expect(frames.filter((frame) => frame.event === 'done')).toHaveLength(0)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   it('runs the same loopback fence as the one-shot route', async () => {
     const server = mount(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -644,14 +693,19 @@ describe('route registration', () => {
     // every click 404s. The registration follows the service identity instead.
     const captured: CapturedRoute[] = []
     let active = { register: (route: CapturedRoute): (() => void) => { captured.push(route); return () => {} } }
-    const ctx = {
-      effect: (): (() => void) => () => {},
+    const ctx: Record<string, unknown> = {
+      effect(fn: () => unknown): () => void {
+        fn()
+        return () => {}
+      },
       get: (key: string): unknown => {
         if (key === 'webServer') return active
         if (key === 'llm') return makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }]))
         return undefined
       },
-      inject: (): void => {},
+      inject(_deps: string[], callback: (child: unknown) => void): void {
+        callback(ctx)
+      },
       on: (): (() => void) => () => {},
     }
     apply(ctx as never, CONFIG)
@@ -662,5 +716,23 @@ describe('route registration', () => {
     apply(ctx as never, CONFIG)
     expect(captured).toHaveLength(2)
     expect(active).not.toBe(stale)
+  })
+
+  it('releases the route when the fiber is disposed, so a reload re-mounts cleanly', () => {
+    // The disposer used to be parked in a module-level map that nothing ever
+    // called: an unloaded plugin kept answering with a stale config reader and
+    // a stale admission gate, and a reload hit `duplicate prefix route`.
+    const { ctx, captured, disposeAll, routeDisposals } = stubContext(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    apply(ctx as never, CONFIG)
+    expect(captured).toHaveLength(1)
+    expect(routeDisposals()).toBe(0)
+
+    disposeAll()
+    expect(routeDisposals()).toBe(1)
+
+    // After the teardown the mount record is gone, so the next apply registers
+    // again instead of believing a route it no longer owns is still live.
+    apply(ctx as never, CONFIG)
+    expect(captured).toHaveLength(2)
   })
 })

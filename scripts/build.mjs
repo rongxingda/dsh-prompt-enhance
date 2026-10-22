@@ -17,7 +17,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const watch = process.argv.includes('--watch')
 const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
 
-/** The host half: ESM with every bare specifier external. */
+/**
+ * The host half: ESM with every bare specifier external.
+ * Annotated so `tsc --checkJs` contextually types the literal options: without
+ * it `packages: 'external'` widens to `string` and stops matching esbuild's
+ * `BuildOptions`, which is the only reason this file needed to be in the
+ * program at all.
+ * @type {import('esbuild').BuildOptions}
+ */
 const hostOptions = {
   entryPoints: [resolve(root, 'src/index.ts')],
   outfile: resolve(root, 'lib/index.js'),
@@ -30,7 +37,10 @@ const hostOptions = {
   logLevel: 'info',
 }
 
-/** The module-loader envelope the dsh web shell expects for client halves. */
+/**
+ * The module-loader envelope the dsh web shell expects for client halves.
+ * @type {import('esbuild').BuildOptions}
+ */
 const clientOptions = {
   entryPoints: [resolve(root, 'src/client/index.tsx')],
   outfile: resolve(root, 'lib/client.js'),

@@ -16,7 +16,16 @@ import { registerEnhanceRoute } from './enhance-routes'
 import { registerEnhanceCommand } from './enhance-command'
 
 export const name = 'prompt-enhance'
-export const inject = ['llm', 'webServer']
+/**
+ * Only the model service is a hard requirement. `webServer` used to be listed
+ * here too, which made the whole entry — including the `/enhance` slash
+ * command — disappear in any composition without a webserver (pure CLI, and
+ * some desktop launches), even though the command needs nothing but `llm`.
+ * The route now waits for the service on its own via
+ * {@link registerEnhanceRoute}'s `ctx.inject`, and is simply absent where
+ * there is no webserver to mount on.
+ */
+export const inject = ['llm']
 
 export { Config, DEFAULT_CONFIG, PROMPT_ENHANCE_NAMESPACE, resolveConfig } from './config'
 export type { StrategyMode } from './config'
@@ -43,9 +52,10 @@ export type { EnhanceError, EnhanceResult, EnhanceRequestBody, EnhanceResponse, 
  * longer exists at all and a boot-time snapshot would otherwise pin the
  * plugin to whatever it read at load.
  *
- * Besides the declared `inject` services (llm, webServer — both required),
- * the host half optionally reads three more through `ctx.get` with
- * `undefined` fallbacks, degrading gracefully when absent:
+ * Besides the declared `llm` dependency, the host half reads four more
+ * services through `ctx.get` / `ctx.inject` with graceful degradation when
+ * absent:
+ * - `webServer` — the enhance route (mounted lazily, absent in non-web runs);
  * - `sessions` — the session's logged request route (model routing);
  * - `settings` — the operator's section, and the harness default model;
  * - `commands` — the `/enhance` slash command registration.

@@ -128,10 +128,18 @@ export function ResultPanel(props: ResultPanelProps): ReactNode {
         const first = focusables[0]
         const last = focusables[focusables.length - 1]
         if (first === undefined || last === undefined) return
-        if (event.shiftKey && document.activeElement === first) {
+        const active = document.activeElement
+        // The panel takes focus on open, and its root is deliberately
+        // `tabIndex={-1}` — so it is neither `first` nor `last`. Testing only
+        // for the endpoints let Shift+Tab walk out of the dialog from that
+        // starting position (the forward direction happened to be covered by
+        // the `[tabindex="-1"]` filter). Treat the root as "before first", so
+        // both directions wrap from wherever focus actually starts.
+        const atRoot = active === panel
+        if (event.shiftKey && (active === first || atRoot)) {
           event.preventDefault()
           last.focus()
-        } else if (!event.shiftKey && document.activeElement === last) {
+        } else if (!event.shiftKey && active === last) {
           event.preventDefault()
           first.focus()
         }
