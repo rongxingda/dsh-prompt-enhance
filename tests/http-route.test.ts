@@ -394,6 +394,24 @@ describe('admission gate: Origin / rate / concurrency', () => {
     }
   })
 
+  it('refuses an Origin from a different local port with 403', async () => {
+    const server = mount(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])))
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = server.address() as AddressInfo
+      // Same loopback hostname, wrong port: a page served by any other local
+      // tool would otherwise be a same-app page and could spend model quota.
+      const response = await fetch(`http://127.0.0.1:${port}/prompt-enhance/enhance`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${port + 1}` },
+        body: JSON.stringify({ text: '写个脚本' }),
+      })
+      expect(response.status).toBe(403)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   it('answers 429 when the per-minute rate cap is hit', async () => {
     const server = mount(makeLlm(() => streamOf(['x'], [{ type: 'finish', reason: { kind: 'stop' } }])), { ...CONFIG, rateLimitPerMinute: 1 })
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))

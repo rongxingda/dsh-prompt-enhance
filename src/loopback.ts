@@ -28,11 +28,49 @@ function hostnameOf(hostHeader: string): string {
   return colon === -1 ? trimmed : trimmed.slice(0, colon)
 }
 
-/** Origins a web page may come from to call the loopback server (same-app pages). */
-function isTrustedOrigin(origin: string): boolean {
+/**
+ * Port named by a Host header value, or `null` when it carries none (which
+ * means the request arrived on the scheme's default port).
+ */
+function portOf(hostHeader: string): string | null {
+  const trimmed = hostHeader.trim().toLowerCase()
+  if (trimmed.startsWith('[')) {
+    const end = trimmed.indexOf(']')
+    if (end === -1) return null
+    const rest = trimmed.slice(end + 1)
+    return rest.startsWith(':') ? rest.slice(1) || null : null
+  }
+  const colon = trimmed.lastIndexOf(':')
+  return colon === -1 ? null : trimmed.slice(colon + 1) || null
+}
+
+/** `URL.hostname` keeps the brackets on IPv6 literals; the allowlist does not. */
+function bareHostname(url: URL): string {
+  const host = url.hostname.toLowerCase()
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host
+}
+
+/** Port an Origin implies, filling in the scheme default when it omits one. */
+function effectivePort(url: URL): string {
+  if (url.port !== '') return url.port
+  return url.protocol === 'https:' ? '443' : '80'
+}
+
+/**
+ * Origins a web page may come from to call the loopback server (same-app
+ * pages). The port must match the one the request was addressed to when the
+ * Host header names a port: without that, every other local server — any dev
+ * tool, any playground page on `localhost:4000` — becomes a same-app page and
+ * may spend the user's model quota through this route. A Host header with no
+ * port (default-port server, or HTTP/1.0 without Host) leaves only the
+ * hostname check, since there is no port to pin against.
+ */
+function isTrustedOrigin(origin: string, expectedPort: string | null): boolean {
   try {
     const url = new URL(origin)
-    return (url.protocol === 'http:' || url.protocol === 'https:') && TRUSTED_HOSTNAMES.has(url.hostname)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+    if (!TRUSTED_HOSTNAMES.has(bareHostname(url))) return false
+    return expectedPort === null || effectivePort(url) === expectedPort
   } catch {
     return false
   }
@@ -48,8 +86,9 @@ function isTrustedOrigin(origin: string): boolean {
  * Requests carrying `X-Forwarded-For` / `Forwarded` are refused outright:
  * those headers only exist when a proxy is in the path, which this route's
  * trust model does not cover. A browser-supplied `Origin` must be a same-app
- * local page — this defeats cross-site fire-and-forget POSTs, which always
- * carry an `Origin` that will not be trusted.
+ * local page on the very port this request was addressed to — this defeats
+ * cross-site fire-and-forget POSTs, which always carry an `Origin` that will
+ * not be trusted, and also shuts out pages served by other local servers.
  */
 export function isTrustedRequest(req: IncomingMessage): boolean {
   if (req.headers['x-forwarded-for'] !== undefined || req.headers.forwarded !== undefined) return false
@@ -58,6 +97,6 @@ export function isTrustedRequest(req: IncomingMessage): boolean {
   if (typeof host !== 'string' || host.trim() === '') return true
   if (!TRUSTED_HOSTNAMES.has(hostnameOf(host))) return false
   const origin = req.headers.origin
-  if (typeof origin === 'string' && origin.trim() !== '' && !isTrustedOrigin(origin)) return false
+  if (typeof origin === 'string' && origin.trim() !== '' && !isTrustedOrigin(origin, portOf(host))) return false
   return true
 }

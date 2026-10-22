@@ -52,6 +52,35 @@ describe('isTrustedRequest (DNS-rebinding fence)', () => {
     expect(isTrustedRequest(req({ host: 'localhost', origin: '' }))).toBe(true)
   })
 
+  it('pins the Origin port to the port the request was addressed to', () => {
+    // Same host, different local server: another dev tool's page on :4000 must
+    // not be able to spend the user's model quota through the enhance route.
+    expect(isTrustedRequest(req({ host: '127.0.0.1:3080', origin: 'http://127.0.0.1:4000' }))).toBe(false)
+    expect(isTrustedRequest(req({ host: 'localhost:3080', origin: 'http://localhost:4000' }))).toBe(false)
+    expect(isTrustedRequest(req({ host: '[::1]:3080', origin: 'http://[::1]:4000' }))).toBe(false)
+    // The matching port is accepted, on either loopback spelling.
+    expect(isTrustedRequest(req({ host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: 'localhost:3080', origin: 'http://127.0.0.1:3080' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: '[::1]:3080', origin: 'http://[::1]:3080' }))).toBe(true)
+    // Default ports compare equal whether or not they are written out.
+    expect(isTrustedRequest(req({ host: 'localhost:80', origin: 'http://localhost' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: 'localhost:443', origin: 'https://localhost' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: 'localhost:80', origin: 'https://localhost' }))).toBe(false)
+  })
+
+  it('leaves the hostname check alone when the Host header names no port', () => {
+    // A default-port server (or HTTP/1.0) gives nothing to pin against, so the
+    // pre-existing hostname-only behaviour stays in force.
+    expect(isTrustedRequest(req({ host: 'localhost', origin: 'http://127.0.0.1:3080' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: 'localhost', origin: 'https://localhost:8443' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: 'localhost', origin: 'http://evil.com:3080' }))).toBe(false)
+  })
+
+  it('treats bracketed and bare IPv6 Origins alike', () => {
+    expect(isTrustedRequest(req({ host: '[::1]:3080', origin: 'http://[::1]:3080' }))).toBe(true)
+    expect(isTrustedRequest(req({ host: '[::1]:3080', origin: 'http://[::1].evil.com:3080' }))).toBe(false)
+  })
+
   it('refuses degenerate and attacker-shaped Origins', () => {
     expect(isTrustedRequest(req({ host: 'localhost', origin: 'null' }))).toBe(false)
     expect(isTrustedRequest(req({ host: 'localhost', origin: 'file://' }))).toBe(false)
