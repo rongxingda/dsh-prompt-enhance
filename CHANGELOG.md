@@ -10,7 +10,7 @@ The fallback is deliberate and narrow: a `Host` header naming no port — a defa
 
 While in there, one real false negative: `URL.hostname` keeps the square brackets on IPv6 literals and the allowlist does not, so `Origin: http://[::1]:3080` was refused even though `Host: [::1]:3080` was trusted. Refusing is the safe direction, but it is still a defect — on an IPv6-only loopback host the served page could never call the route at all. Brackets are stripped before the comparison now.
 
-Verification: three new unit cases plus one end-to-end 403 through a real listening server; **all four fail against the 0.3.1 code** (including the IPv6 case) and pass here. Suite: **24 files / 246 cases green** (was 242); `lib/` rebuilt; typecheck clean.
+Verification: three new unit cases plus one end-to-end 403 through a real listening server — three of the four fail against the 0.3.1 code (the IPv6 case included, so neither is a paper argument); the fourth pins the `Host`-without-port fallback, the behaviour deliberately carried over, and therefore passes on both the old and the new code by design. Suite: **24 files / 246 cases green** (was 242); `lib/` rebuilt; typecheck clean.
 
 ## 0.3.1 (2026-10-22)
 
