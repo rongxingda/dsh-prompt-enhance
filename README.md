@@ -110,13 +110,14 @@ dsh plugin --profile web remove dsh-prompt-enhance
 
 ## Configuration
 
-Everything lives in the `prompt-enhance` settings namespace, edited from the web GUI's **Settings → 插件配置** page. Changes apply to the very next call — no restart. Every enhancement is one billable LLM call: `maxOutputTokens` bounds its cost, and the host-side concurrency/rate caps bound how often calls can be made.
+Everything lives in the `prompt-enhance` settings namespace, edited from the web GUI's **Settings → 插件配置** page. Changes apply to the very next call — no restart. Every enhancement is one billable LLM call: `reasoningEffort` and `maxOutputTokens` bound how many tokens it spends, and the host-side concurrency/rate caps bound how often calls can be made.
 
 | Field | Default | Description |
 |---|---|---|
 | `enabled` | `true` | Master switch; off hides the button and disables every trigger |
 | `provider` + `model` | empty | Explicit route override; must be filled as a **pair** (or both empty to follow the current session model) |
 | `temperature` | `0.3` | Low temperature keeps the rewrite faithful to the original |
+| `reasoningEffort` | `off` | Reasoning budget sent with the call: `off` / `low` / `high` / `inherit` (omit the field and follow the model's own default). A rewrite is a short, well-specified task, so the model's default budget is pure waste — measured on one and the same draft: `high` spent **2897** output tokens where `off` spent **252**, an 11× difference for the same rewrite. Models that declare no reasoning capability are handled: the harness rejects an explicit effort with `UNSUPPORTED_REASONING_EFFORT`, and the call is retried once with the field omitted, so this setting never breaks such a route |
 | `maxOutputTokens` | `2048` | Output token budget of one enhancement call |
 | `maxInputChars` | `12000` | Input character cap (counted in Unicode code points — an emoji is one character); over-limit drafts are **rejected, never truncated** |
 | `timeoutMs` | `60000` | End-to-end deadline of one call |
@@ -161,6 +162,7 @@ Set `systemPrompt` in the settings to use your own strategy; `strategyMode` deci
 | Concurrency cap full | `429` (`concurrency-limit`), no `Retry-After` — a slot frees whenever an in-flight call settles |
 | Upstream model failure | Stable codes mapped to readable hints: `AUTH` → check API key, `RATE_LIMIT` → retry later, `QUOTA_EXCEEDED` → check balance, `CONTEXT_WINDOW_EXCEEDED` → shorten input, `NO_ADAPTER`/unconfigured → configure a model |
 | Output reaches `maxOutputTokens` | Refused with a hint to raise the cap or shorten the draft |
+| Route's model declares no reasoning capability | The `UNSUPPORTED_REASONING_EFFORT` refusal is not shown: the effort is dropped and the call retried once. `reasoningEffort: inherit` never sends the field, so it never hits this path |
 | Model returns empty / fence-wrapped / tool-call output | Normalized (fences stripped) or refused; retryable |
 | Timeout | `504`-mapped message with the configured seconds; retryable |
 | Browser tab closed mid-flight | The host route detects the disconnect and aborts the model call |

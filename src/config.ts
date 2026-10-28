@@ -13,6 +13,16 @@ export const PROMPT_ENHANCE_NAMESPACE = 'prompt-enhance'
 /** How a non-empty `systemPrompt` combines with the built-in strategy. */
 export type StrategyMode = 'replace-default' | 'extend-default'
 
+/**
+ * Reasoning budget forwarded to the rewrite call.
+ *
+ * A rewrite is a short, well-specified text transformation, so the cheap
+ * efforts return the same quality as the expensive one. `inherit` leaves the
+ * field unset so the route's own default applies — the field is omitted rather
+ * than guessed.
+ */
+export type ReasoningEffortChoice = 'off' | 'low' | 'high' | 'inherit'
+
 /** The plugin's deployed configuration. */
 export interface Config {
   /** Master switch; off hides the composer button and disables all triggers. */
@@ -23,6 +33,21 @@ export interface Config {
   model?: string
   /** Sampling temperature; low keeps the rewrite faithful to the original. */
   temperature: number
+  /**
+   * Reasoning budget for the rewrite, forwarded to the model call.
+   *
+   * A rewrite does not need deep reasoning, and the route's own default can be
+   * expensive. Measured on deepseek-flash with one ordinary draft: `off` spent
+   * 252 output tokens and returned 439 characters of text, `low` spent 619, and
+   * the route default (`high`) spent 2897 for 979 characters. `off` is
+   * therefore the default here, which is also why the plugin must send it
+   * EXPLICITLY — omitting the field silently inherits the expensive route
+   * default.
+   *
+   * `inherit` omits the field entirely, for routes that reject an explicit
+   * effort.
+   */
+  reasoningEffort: ReasoningEffortChoice
   /** Output token budget of one enhancement call. */
   maxOutputTokens: number
   /** Input character cap; over-length drafts are rejected, never truncated. */
@@ -68,6 +93,10 @@ export interface Config {
 export const DEFAULT_CONFIG: Config = {
   enabled: true,
   temperature: 0.3,
+  // A rewrite does not need deep reasoning, and the route default is expensive
+  // (measured: 2897 output tokens at `high` vs 252 at `off` for the same draft).
+  // Sent explicitly, because omitting the field inherits that route default.
+  reasoningEffort: 'off',
   maxOutputTokens: 2048,
   maxInputChars: 12000,
   timeoutMs: 60000,
@@ -109,6 +138,7 @@ export const Config = z.object({
   provider: z.string().description('覆盖模型路由的 provider（与「模型」必须成对填写；留空跟随当前会话模型）').volatile(),
   model: z.string().description('覆盖模型路由的 model（与「provider」必须成对填写；留空跟随当前会话模型）').volatile(),
   temperature: z.number().min(0).max(1).step(0.05).default(DEFAULT_CONFIG.temperature).description('采样温度；低温改写更忠实于原意').volatile(),
+  reasoningEffort: z.union(['off', 'low', 'high', 'inherit']).default(DEFAULT_CONFIG.reasoningEffort).description('推理预算：改写是短而明确的任务，不需要深度思考，而模型自身的默认档往往很贵（同一句话：off 约 252 输出 token，high 约 2897）。off/low 最省；inherit 表示不传该字段、完全跟随模型的默认档').volatile(),
   maxOutputTokens: z.number().step(1).min(256).max(32768).default(DEFAULT_CONFIG.maxOutputTokens).description('单次增强的输出 token 上限').volatile(),
   maxInputChars: z.number().step(1).min(200).max(200000).default(DEFAULT_CONFIG.maxInputChars).description('输入字数上限；超限拒绝而不截断，避免改变原意').volatile(),
   timeoutMs: z.number().step(1).min(5000).max(600000).default(DEFAULT_CONFIG.timeoutMs).description('单次增强的超时（毫秒）').volatile(),
@@ -122,6 +152,21 @@ export const Config = z.object({
   contextMaxMessages: z.number().step(1).min(0).max(50).default(DEFAULT_CONFIG.contextMaxMessages).description('上下文窗口（条数）：最多参考最近多少条 user/assistant 轮次；0 表示不参考').volatile(),
   contextMaxChars: z.number().step(1).min(0).max(100000).default(DEFAULT_CONFIG.contextMaxChars).description('上下文窗口（字数）：历史片段的字符预算，从最新一条向前装配；0 表示不参考').volatile(),
 })
+
+/** Validated reasoning choices; `inherit` means "send no effort field at all". */
+const REASONING_CHOICES: readonly ReasoningEffortChoice[] = ['off', 'low', 'high', 'inherit']
+
+/**
+ * Normalize a stored reasoning choice. Anything unrecognized — a section stored
+ * before the field existed, or a hand-edited value — falls back to the shipped
+ * default, which is the cheapest one; an unknown string must never reach the
+ * adapter as an effort id it will reject.
+ * @param value - untrusted stored value.
+ * @returns the validated choice.
+ */
+function resolveReasoningEffort(value: unknown): ReasoningEffortChoice {
+  return REASONING_CHOICES.find((choice) => choice === value) ?? DEFAULT_CONFIG.reasoningEffort
+}
 
 /**
  * Validate and detach one resolved config. Unknown keys (leftovers from older
@@ -170,6 +215,10 @@ export function resolveConfig(config: Config): Config {
     provider: pairOrUndefined(provider),
     model: pairOrUndefined(model),
     temperature,
+    // Absent (a section stored before this field existed) means the cheapest
+    // shipped default; an unrecognized hand-edited value degrades the same way
+    // rather than reaching the model call as a rejected effort id.
+    reasoningEffort: resolveReasoningEffort(config.reasoningEffort),
     maxOutputTokens: intInRange(config.maxOutputTokens, 'maxOutputTokens', 256, 32768),
     maxInputChars: intInRange(config.maxInputChars, 'maxInputChars', 200, 200000),
     timeoutMs: intInRange(config.timeoutMs, 'timeoutMs', 5000, 600000),

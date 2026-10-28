@@ -2,6 +2,18 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); releases from **0.2.3** onward also have a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes (0.2.0–0.2.2 are tagged but have no Release page — see this file for their notes).
 
+## Unreleased
+
+**Adds `reasoningEffort`.** The plugin never set a reasoning budget, so every enhancement inherited whatever the routed model calls its default — and for a rewriting task that default is almost entirely waste. Measured on one and the same draft with `deepseek-flash`: **252** output tokens at `off` against **2897** at `high`, an 11× difference producing the same rewrite. Enhancement happens on every shortcut press, so that multiplier is the whole cost of the feature.
+
+The setting takes `off` (default) / `low` / `high` / `inherit`, where `inherit` omits the field and reproduces the previous behaviour verbatim — the old cost model is still reachable, it is just no longer the only one.
+
+The interesting half is the route that cannot take the field at all. A model whose capability declares no reasoning support is refused by the harness *before* any provider I/O, with the stable code `UNSUPPORTED_REASONING_EFFORT` — and that refusal arrives as a terminal `error` finish **chunk**, not an exception, because the harness converts adapter failures into chunks rather than propagating them. So the retry has to live in the finish-reason handling, and it drops the effort and re-reads the call exactly once. A getter that throws is also caught, for a host that rejects the effort somewhere the terminal conversion does not reach; no current host takes that path, and no test relies on it as the primary route.
+
+Two regression traps are pinned by tests rather than by comment. First, the retry needs a **fresh** assembler and iterator per attempt — reusing either splices the first attempt's partial blocks into the second attempt's result. Second, an earlier version of the retry test stubbed the refusal as a *throw* and passed while a live host kept failing, because the real refusal is a chunk; the helper now builds the exact chunk shape from the harness source, and a separate case pins the thrown variant to the same observable behaviour. Retrying is also bounded to one attempt: when `inherit` is already in force the refusal cannot be about the effort, so it is surfaced as-is instead of spending quota twice.
+
+Verification: six new cases in `tests/enhancer.test.ts` (forwarding, `inherit` omission, one-shot downgrade with the second request verified to carry no field, no-retry under `inherit`, no-retry-of-the-retry, thrown-refusal parity), three in `tests/config.test.ts` (default, explicit values, and degradation of an absent or hand-edited value). `tests/config.test.ts`'s exhaustive key list gained `reasoningEffort`, which is what that assertion is for. Suite: **24 files / 255 cases green** (was 246; the 0.3.2 baseline plus these nine); `lib/` rebuilt; typecheck clean. Both READMEs document the field, the measured numbers, and the no-reasoning fallback.
+
 ## 0.3.2 (2026-10-22)
 
 Closes the last item 0.3.1 listed as deliberately out of scope: the loopback fence compared an `Origin`'s **hostname** against the allowlist but never its **port**, so a page served by any other local server — a dev tool on `localhost:4000`, a playground, a docs preview — was *admitted* by the fence as a same-app page.

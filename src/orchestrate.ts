@@ -252,6 +252,7 @@ export async function runEnhance(ctx: Context, config: Config, options: RunEnhan
       system: effectiveSystemPrompt(config, context === undefined ? DEFAULT_SYSTEM_PROMPT : withContextRules(DEFAULT_SYSTEM_PROMPT)),
       text: options.text,
       temperature: config.temperature,
+      reasoningEffort: config.reasoningEffort,
       maxTokens: config.maxOutputTokens,
       timeoutMs: config.timeoutMs,
       signal: options.signal,
