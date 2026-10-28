@@ -37,11 +37,48 @@ function stubLlm(stream: (options: GenerateOptions) => AsyncIterable<StreamChunk
   }
 }
 
+/**
+ * Mimic how a real host reports the harness refusing an explicit reasoning
+ * effort for a model whose capability declares no reasoning at all.
+ *
+ * Shape copied from the harness source, not invented: an adapter throw is turned
+ * into a terminal `error` finish CHUNK rather than propagating
+ * (`dsh-llm/lib/types/index.js`: "Adapter selection, dispatch, and iteration
+ * failures become terminal `error` or `aborted` finish chunks"), and
+ * `normalizeLlmFailure` keeps the code verbatim because `harnessErrorCode` reads
+ * `error.code` off any `HarnessError` and `LlmError` is one. So the stable string
+ * `UNSUPPORTED_REASONING_EFFORT` arrives as `failure.code`, and the message is the
+ * localized prose the retry must NOT be matching on.
+ * @param effort - the effort the call asked for.
+ * @returns the terminal finish chunk a live host emits for that call.
+ */
+function noReasoningSupport(effort: string): StreamChunk {
+  return {
+    type: 'finish',
+    reason: {
+      kind: 'error',
+      failure: {
+        message: `provider "agnes" model "agnes-2.5-flash" does not support reasoning effort "${effort}"`,
+        code: 'UNSUPPORTED_REASONING_EFFORT',
+      },
+    },
+  }
+}
+
+/** A stream whose only content is the harness's unsupported-effort refusal. */
+function refusalStream(effort: string): AsyncIterable<StreamChunk> {
+  const chunk = noReasoningSupport(effort)
+  return (async function* (): AsyncGenerator<StreamChunk> {
+    yield chunk
+  })()
+}
+
 const baseOptions = {
   route: { provider: 'zhipu', model: 'glm-5.3' } satisfies RoutePair,
   system: 'SYS',
   text: '帮我写个爬虫',
   temperature: 0.3,
+  reasoningEffort: 'off' as const,
   maxTokens: 512,
   timeoutMs: 5000,
 }
@@ -56,6 +93,88 @@ describe('enhanceText', () => {
     expect(llm.calls[0]?.system).toBe('SYS')
     expect(llm.calls[0]?.temperature).toBe(0.3)
     expect(llm.calls[0]?.messages[0]?.content[0]).toMatchObject({ type: 'text' })
+  })
+
+  // Cost regression: omitting the field makes the adapter apply the model's own
+  // default effort, which measured ~11x the output tokens of `off` on
+  // deepseek-flash for the same draft. The effort must reach the call.
+  it('forwards the configured reasoning effort to the model call', async () => {
+    const llm = stubLlm(() => textStream(['ok'], { reason: 'stop' }))
+    await enhanceText(llm, { ...baseOptions, reasoningEffort: 'low' })
+    expect(llm.calls[0]?.reasoningEffort).toBe('low')
+  })
+
+  it('omits the reasoning effort entirely when set to inherit', async () => {
+    const llm = stubLlm(() => textStream(['ok'], { reason: 'stop' }))
+    await enhanceText(llm, { ...baseOptions, reasoningEffort: 'inherit' })
+    expect(llm.calls[0]).not.toHaveProperty('reasoningEffort')
+  })
+
+  // The harness rejects an explicit effort outright when the model declares no
+  // reasoning capability, before any provider I/O, with this exact code. The
+  // cheap `off` default must therefore degrade to "no field" for those models
+  // instead of failing every call.
+  //
+  // This test asserts on the finish-chunk shape on purpose. An earlier version
+  // of it stubbed the refusal as a THROW and passed while the real host kept
+  // failing: the harness converts an adapter failure into a terminal finish
+  // chunk, so nothing was ever thrown for the retry to catch. The stub had the
+  // wrong shape, not the assertion.
+  it('retries once without the effort when the model has no reasoning capability', async () => {
+    const llm = stubLlm((options) => {
+      if (options.reasoningEffort !== undefined) return refusalStream(options.reasoningEffort)
+      return textStream(['ok'], { reason: 'stop' })
+    })
+    const result = await enhanceText(llm, baseOptions)
+    expect(result.text).toBe('ok')
+    expect(llm.calls).toHaveLength(2)
+    // The rejected attempt is not silently dropped: it is identifiable in the
+    // recorded traffic as the one that carried the effort.
+    expect(llm.calls[0]?.reasoningEffort).toBe('off')
+    expect(llm.calls[1]).not.toHaveProperty('reasoningEffort')
+  })
+
+  it('surfaces the refusal without retrying when the effort was already inherit', async () => {
+    let calls = 0
+    const llm = stubLlm(() => {
+      calls += 1
+      return refusalStream('off')
+    })
+    await expect(enhanceText(llm, { ...baseOptions, reasoningEffort: 'inherit' })).rejects.toMatchObject({ detail: { code: 'upstream' } })
+    // No effort was sent, so the refusal cannot belong to this call: retrying
+    // would send the identical request and fail the same way.
+    expect(calls).toBe(1)
+  })
+
+  it('surfaces the error when the deferred retry fails too', async () => {
+    let calls = 0
+    const llm = stubLlm(() => {
+      calls += 1
+      return refusalStream('off')
+    })
+    await expect(enhanceText(llm, baseOptions)).rejects.toMatchObject({ detail: { code: 'upstream' } })
+    // Exactly one deferral: the retry is not itself retried.
+    expect(calls).toBe(2)
+  })
+
+  // Defence in depth for a host that rejects the effort outside the harness's
+  // terminal conversion. Nothing ships that relies on this `catch` — a live host
+  // takes the finish-chunk path above — but the retry must not regress silently
+  // if one ever throws, so both shapes are pinned to the same observable
+  // behaviour: one retry, and the second request carries no effort.
+  it('retries the same way when the refusal arrives as a thrown error', async () => {
+    const llm = stubLlm((options) => {
+      if (options.reasoningEffort !== undefined) {
+        return (async function* (): AsyncGenerator<StreamChunk> {
+          throw Object.assign(new Error(`provider "agnes" model "agnes-2.5-flash" does not support reasoning effort "${options.reasoningEffort}"`), { code: 'UNSUPPORTED_REASONING_EFFORT' })
+        })()
+      }
+      return textStream(['ok'], { reason: 'stop' })
+    })
+    const result = await enhanceText(llm, baseOptions)
+    expect(result.text).toBe('ok')
+    expect(llm.calls).toHaveLength(2)
+    expect(llm.calls[1]).not.toHaveProperty('reasoningEffort')
   })
 
   it('strips a wrapping fence from the model output', async () => {

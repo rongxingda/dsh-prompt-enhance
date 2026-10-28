@@ -102,7 +102,7 @@ describe('resolveConfig', () => {
     expect(Object.keys(resolved).sort()).toEqual([
       'contextAware', 'contextMaxChars', 'contextMaxMessages', 'enabled',
       'maxConcurrent', 'maxInputChars', 'maxOutputTokens', 'model',
-      'provider', 'rateLimitPerMinute',
+      'provider', 'rateLimitPerMinute', 'reasoningEffort',
       'shortcut', 'strategyMode', 'streaming', 'systemPrompt', 'temperature', 'timeoutMs',
     ])
   })
@@ -133,6 +133,25 @@ describe('resolveConfig', () => {
   it('rejects an out-of-range context window', () => {
     expect(() => resolveConfig({ ...DEFAULT_CONFIG, contextMaxMessages: 99 })).toThrow(/contextMaxMessages/)
     expect(() => resolveConfig({ ...DEFAULT_CONFIG, contextMaxChars: -1 })).toThrow(/contextMaxChars/)
+  })
+
+  it('defaults the reasoning effort to the cheapest shipped choice', () => {
+    expect(DEFAULT_CONFIG.reasoningEffort).toBe('off')
+    expect(resolveConfig({ ...DEFAULT_CONFIG }).reasoningEffort).toBe('off')
+  })
+
+  it('keeps an explicit reasoning effort', () => {
+    expect(resolveConfig({ ...DEFAULT_CONFIG, reasoningEffort: 'inherit' }).reasoningEffort).toBe('inherit')
+    expect(resolveConfig({ ...DEFAULT_CONFIG, reasoningEffort: 'low' }).reasoningEffort).toBe('low')
+  })
+
+  it('degrades an absent or hand-edited reasoning effort to the cheap default', () => {
+    // A section stored before the field existed, and a hand-edited value: both
+    // must resolve to a choice the adapter accepts, never to a rejected id.
+    const missing = { ...DEFAULT_CONFIG } as Partial<typeof DEFAULT_CONFIG>
+    delete missing.reasoningEffort
+    expect(resolveConfig(missing as typeof DEFAULT_CONFIG).reasoningEffort).toBe('off')
+    expect(resolveConfig({ ...DEFAULT_CONFIG, reasoningEffort: 'turbo' as never }).reasoningEffort).toBe('off')
   })
 })
 

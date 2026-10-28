@@ -110,13 +110,14 @@ dsh plugin --profile web remove dsh-prompt-enhance
 
 ## 配置
 
-全部配置位于 `prompt-enhance` 设置命名空间,在 Web GUI 的 **设置 → 插件配置** 页编辑。改动作用于下一次调用——无需重启。每次增强都是一次计费的 LLM 调用——`maxOutputTokens` 约束单次成本,并发/限流字段约束调用频率。
+全部配置位于 `prompt-enhance` 设置命名空间,在 Web GUI 的 **设置 → 插件配置** 页编辑。改动作用于下一次调用——无需重启。每次增强都是一次计费的 LLM 调用——`reasoningEffort` 与 `maxOutputTokens` 约束单次花多少 token,并发/限流字段约束调用频率。
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | `true` | 总开关;关闭隐藏按钮并停用所有触发方式 |
 | `provider` + `model` | 空 | 显式路由覆盖;必须**成对**填写(或都留空以跟随当前会话模型) |
 | `temperature` | `0.3` | 低温使改写更忠实于原意 |
+| `reasoningEffort` | `off` | 随调用发送的推理预算:`off` / `low` / `high` / `inherit`(不传该字段、完全跟随模型默认档)。改写是短而明确的任务,模型默认档纯属浪费——同一句话实测:`high` 花 **2897** 输出 token,`off` 只花 **252**,同样的结果差 11 倍。声明无推理能力的模型也能用:宿主要以 `UNSUPPORTED_REASONING_EFFORT` 拒绝显式档位,此时自动摘掉该字段重试一次,所以这个设置不会让这类路由失败 |
 | `maxOutputTokens` | `8192` | 单次增强调用的输出 token 预算 |
 | `maxInputChars` | `12000` | 输入字符数上限(按 Unicode 字符统计,不是 token 数;一个 emoji 算一个字符);超限**拒绝而不截断** |
 | `timeoutMs` | `60000` | 单次调用的端到端超时 |
@@ -162,6 +163,7 @@ dsh plugin --profile web remove dsh-prompt-enhance
 | 上游模型失败 | 稳定错误码映射为可读提示:`AUTH` → 检查 API Key、`RATE_LIMIT` → 稍后重试、`QUOTA_EXCEEDED` → 检查余额、`CONTEXT_WINDOW_EXCEEDED` → 精简输入、`NO_ADAPTER`/未配置 → 先配置模型 |
 | 输出达到 `maxOutputTokens` | 拒绝并提示调大上限或精简原文 |
 | 模型返回空 / 围栏包裹 / 工具调用 | 规范化(剥围栏)或拒绝;可重试 |
+| 路由的模型声明无推理能力 | `UNSUPPORTED_REASONING_EFFORT` 不会弹给用户:摘掉档位字段重试一次即成功。`reasoningEffort: inherit` 本来就不发该字段,永不进入这条路径 |
 | 超时 | 映射为 `504` 的提示并给出配置秒数;可重试 |
 | 浏览器中途关闭 | 宿主路由侦测连接断开,立即中止模型调用 |
 | 切换会话 | 面板状态、撤销栈、快捷键目标均按会话隔离;切换即关闭面板并清理撤销记录 |
