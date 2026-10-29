@@ -117,7 +117,7 @@ dsh plugin --profile web remove dsh-prompt-enhance
 | `enabled` | `true` | 总开关;关闭隐藏按钮并停用所有触发方式 |
 | `provider` + `model` | 空 | 显式路由覆盖;必须**成对**填写(或都留空以跟随当前会话模型) |
 | `temperature` | `0.3` | 低温使改写更忠实于原意 |
-| `maxOutputTokens` | `2048` | 单次增强调用的输出 token 预算 |
+| `maxOutputTokens` | `8192` | 单次增强调用的输出 token 预算 |
 | `maxInputChars` | `12000` | 输入字符数上限(按 Unicode 字符统计,不是 token 数;一个 emoji 算一个字符);超限**拒绝而不截断** |
 | `timeoutMs` | `60000` | 单次调用的端到端超时 |
 | `systemPrompt` | 内置策略 | 自定义增强策略文本;与内置策略如何组合见 `strategyMode` |

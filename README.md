@@ -117,7 +117,7 @@ Everything lives in the `prompt-enhance` settings namespace, edited from the web
 | `enabled` | `true` | Master switch; off hides the button and disables every trigger |
 | `provider` + `model` | empty | Explicit route override; must be filled as a **pair** (or both empty to follow the current session model) |
 | `temperature` | `0.3` | Low temperature keeps the rewrite faithful to the original |
-| `maxOutputTokens` | `2048` | Output token budget of one enhancement call |
+| `maxOutputTokens` | `8192` | Output token budget of one enhancement call |
 | `maxInputChars` | `12000` | Input character cap (counted in Unicode code points — an emoji is one character); over-limit drafts are **rejected, never truncated** |
 | `timeoutMs` | `60000` | End-to-end deadline of one call |
 | `systemPrompt` | built-in strategy | Custom strategy text; how it combines with the built-in strategy is set by `strategyMode` |
