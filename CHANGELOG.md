@@ -2,6 +2,18 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); releases from **0.2.3** onward also have a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes (0.2.0–0.2.2 are tagged but have no Release page — see this file for their notes).
 
+## 0.3.3 (2026-11-03)
+
+Moves the build onto `@deepseek-ai/dsh-*@0.2.1-rc.5`, the current `latest`, and records the uncomfortable half of that sentence: **not one line of plugin code had to change**. Everything that looks like adaptation here is bookkeeping, a diff, and a real-host run — which is exactly what should happen when an upstream point release does not touch your contracts, and exactly what is worth documenting rather than dressing up.
+
+**What actually moved upstream.** Every package the plugin compiles against was installed at `rc.2` and at `rc.5` and compared file by file: 26 packages changed version, and **every `lib/` tree is byte-identical except `dsh-client-ui-conversation`**. That one gained a View-tabs More menu (`conversation.session.header.views.actions`, `view-pins`, `setPinned`), a `whenDraftExists: 'replace' | 'append' | 'keep'` on `DraftInitializationOptions` for session-navigation draft seeding, and `newSession` / `agentPreset` on composer submissions. None of them is a contract this plugin registers against, calls, or reads. `setDraft(text: string)` in particular is unchanged, so the 0.3.1 note about undo dropping reference chips stays true — the host setter still takes plain text.
+
+**Verified on a real `0.2.1-rc.5` host**, not inferred from the diff: the plugin composed into the loader tree as id `prompt-enhance`; `POST /prompt-enhance/enhance` answered `200` with a real model result (`deepseek-official` / `deepseek-flash`, 3.6 s); `POST /prompt-enhance/enhance-stream` emitted live `event: delta` frames; and `dsh --dump-config-schema` projected the entry as `config100` with **16 of 16 fields carrying `x-cordis.volatile`** — the single condition `SettingsForms.describe()` checks before it renders a settings page. The same dump prints four `unrecognized Loader tree carrier` errors **with and without this plugin installed**, so they belong to the host's own tree generation, not to `cordis.patch.yml`.
+
+**One thing worth knowing about `rc.5`.** The web app now prints its URL with a `?token=` and the CLI exposes `--trusted-host` for the `/api` browser-trust fence, but a route registered through the shared `webServer` — this plugin's — is not behind that fence: a token-less request from a loopback socket still answered, as before. The loopback / `Host` / pinned-`Origin` fence is therefore still the whole of this route's admission control, and the 0.3.2 hardenings still carry it.
+
+Suite: **24 files / 246 cases green** (unchanged — no production file was touched); typecheck clean; `lib/` rebuilt and byte-identical, so the published artifact for `0.3.2` and `0.3.3` differ only in metadata and docs.
+
 ## 0.3.2 (2026-10-22)
 
 Closes the last item 0.3.1 listed as deliberately out of scope: the loopback fence compared an `Origin`'s **hostname** against the allowlist but never its **port**, so a page served by any other local server — a dev tool on `localhost:4000`, a playground, a docs preview — was *admitted* by the fence as a same-app page.
