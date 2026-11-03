@@ -20,9 +20,8 @@ Two regression traps are pinned by tests rather than by comment. First, the retr
 
 **Not included, on purpose.** The second half of `#10` — enhancing a draft that starts with a command chip — is held back. It fills the result back through `setDraft({ text, references, command })`, an object form the host *implements* (`resolveDraftInput`) but does not publish in `InputActions.setDraft(text: string)`; it only compiles behind an `as never`. Merging a write whose contract is undocumented, into the path that overwrites the user's draft, is not worth the risk without a live click-through. The PR stays open with that reasoning.
 
-Suite: **24 files / 256 cases green** (was 246); typecheck clean; `lib/` rebuilt.
-
 Verification: six new cases in `tests/enhancer.test.ts` (forwarding, `inherit` omission, one-shot downgrade with the second request verified to carry no field, no-retry under `inherit`, no-retry-of-the-retry, thrown-refusal parity), three in `tests/config.test.ts` (default, explicit values, and degradation of an absent or hand-edited value). `tests/config.test.ts`'s exhaustive key list gained `reasoningEffort`, which is what that assertion is for. Suite: **24 files / 256 cases green** (was 246; the 0.3.2 baseline, the `maxOutputTokens` case, and these nine); `lib/` rebuilt; typecheck clean. Both READMEs document the field, the measured numbers, and the no-reasoning fallback.
+
 ## 0.3.3 (2026-11-03)
 
 Moves the build onto `@deepseek-ai/dsh-*@0.2.1-rc.5`, the current `latest`, and records the uncomfortable half of that sentence: **not one line of plugin code had to change**. Everything that looks like adaptation here is bookkeeping, a diff, and a real-host run — which is exactly what should happen when an upstream point release does not touch your contracts, and exactly what is worth documenting rather than dressing up.
