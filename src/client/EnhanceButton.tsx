@@ -57,6 +57,23 @@ function stringOf(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+/**
+ * The leading slash token of a claimed draft, for hosts that publish the
+ * submit phase but not the claim object itself.
+ *
+ * Every dsh line this plugin targets publishes `phase: 'claimed'` when a
+ * command chip sits at the start of the draft, but only the 0.2.x lines also
+ * publish `claim.token`. The chip's own text is the token without its trailing
+ * separator (`/计划`), so the draft reads `<token><separator><body>` and the
+ * leading `/`-token is exactly the part that must not be rewritten.
+ * @param draft - the composer draft.
+ * @returns the leading token, or undefined when the draft does not start with one.
+ */
+function leadingCommandOf(draft: string): string | undefined {
+  const match = /^\/[^\s/]+/.exec(draft)
+  return match === null ? undefined : match[0]
+}
+
 /** One composer's enhance trigger. */
 export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const { t, sessionId, useInput, inputActions } = props
@@ -72,6 +89,17 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
   const attachmentCount = useInput((state: InputState) => {
     const record = state as { attachmentIds?: unknown; imageIds?: unknown }
     return countOf(record.attachmentIds) + countOf(record.imageIds)
+  })
+  // The command chip in front of the draft, when the host publishes one. Its
+  // token is what the user sees (`/计划`) and it is NOT part of the prompt:
+  // rewriting it would turn a command into prose. Read defensively — an absent
+  // claim only means this host does not publish one, and the draft-prefix
+  // fallback below still covers `phase: 'claimed'`.
+  const claimToken = useInput((state: InputState) => {
+    const claim = (state as { claim?: { token?: unknown } }).claim
+    return claim !== null && typeof claim === 'object' && typeof claim.token === 'string' && claim.token !== ''
+      ? claim.token
+      : undefined
   })
   const settings = useSyncExternalStore(subscribeClientSettings, getClientSettings)
   const panel = useSyncExternalStore(ui.subscribe, ui.getPanel)
@@ -102,7 +130,38 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
       ui.openError(uiKey, draft, { code: 'rejected', localized: attachmentsOnly })
       return
     }
-    const check = checkInputText(draft, settings.maxInputChars)
+    // A claimed command chip is NOT a busy composer: the submit machine uses
+    // `claimed` for "a leading command is waiting for its arguments", which is
+    // exactly the state a user is in right after picking /计划 and starting to
+    // type. Only the genuinely busy phases refuse.
+    if (phase !== 'plain' && phase !== 'claimed') {
+      const busyPhase = t('error.phase')
+      ui.openError(uiKey, draft, { code: 'rejected', localized: busyPhase })
+      return
+    }
+    // What actually gets rewritten: the draft minus a leading command token.
+    // The token is a command, not prose — sending it to the model would have
+    // the rewrite consume it, and filling the result back would leave a
+    // half-rewritten command line behind.
+    let prefix = ''
+    let body = draft
+    if (phase === 'claimed') {
+      const spelling = (claimToken ?? leadingCommandOf(draft))?.trimEnd()
+      if (spelling === undefined || spelling === '' || !draft.startsWith(spelling)) {
+        // The split cannot be proven, so refuse instead of rewriting blindly.
+        const unsupported = t('error.commandUnsupported')
+        ui.openError(uiKey, draft, { code: 'rejected', localized: unsupported })
+        return
+      }
+      prefix = spelling
+      body = draft.slice(spelling.length).replace(/^\s+/, '')
+      if (body.trim() === '') {
+        const commandEmpty = t('error.commandEmpty')
+        ui.openError(uiKey, draft, { code: 'rejected', localized: commandEmpty })
+        return
+      }
+    }
+    const check = checkInputText(body, settings.maxInputChars)
     if (!check.ok) {
       const message = check.code === 'empty'
         ? t('error.empty')
@@ -115,13 +174,8 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
       ui.openError(uiKey, draft, { code: 'rejected', localized: occurrences })
       return
     }
-    if (phase !== 'plain') {
-      const busyPhase = t('error.phase')
-      ui.openError(uiKey, draft, { code: 'rejected', localized: busyPhase })
-      return
-    }
     const controller = new AbortController()
-    ui.openLoading({ sessionId: uiKey, original: draft, abort: () => controller.abort() })
+    ui.openLoading({ sessionId: uiKey, original: draft, ...(prefix === '' ? {} : { prefix }), abort: () => controller.abort() })
     const settle = (result: Parameters<typeof ui.settleResult>[1]): void => ui.settleResult(uiKey, result)
     const fail = (error: unknown): void => {
       const detail: EnhanceError = error instanceof EnhanceClientError
@@ -133,14 +187,14 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
     // writes, and degrades to the one-shot call on its own when the host or
     // the transport cannot stream.
     if (settings.streaming) {
-      requestEnhanceStream({ sessionId: wireId, text: draft }, {
+      requestEnhanceStream({ sessionId: wireId, text: body }, {
         signal: controller.signal,
         onDelta: (delta: string): void => ui.appendDelta(uiKey, delta),
       }).then(settle, fail)
       return
     }
-    requestEnhance({ sessionId: wireId, text: draft }, controller.signal).then(settle, fail)
-  }, [anyBusy, draft, attachmentCount, occurrenceCount, phase, settings, uiKey, wireId, t])
+    requestEnhance({ sessionId: wireId, text: body }, controller.signal).then(settle, fail)
+  }, [anyBusy, claimToken, draft, attachmentCount, occurrenceCount, phase, settings, uiKey, wireId, t])
 
   // The session registry holds a stable identity; run always dispatches to
   // the latest start callback. The refresh rides an effect (never the render
@@ -168,13 +222,27 @@ export function EnhanceButton(props: EnhanceButtonProps): ReactNode {
 
   /** Apply the enhanced result: remember the CURRENT draft (pre-apply, so
    * undo restores exactly this state even if the user typed during the
-   * request), then fill the enhanced text back. */
+   * request), then fill the enhanced text back. A leading command token is
+   * kept in front of the result — only the body was rewritten, so the command
+   * must keep working after the fill-back. */
   const apply = useCallback((): void => {
     if (panel === undefined || panel.phase !== 'result' || panel.result === undefined) return
-    ui.pushUndo(uiKey, { original: draft, applied: panel.result.text })
-    inputActions.setDraft(panel.result.text)
+    const next = panel.prefix === undefined || panel.prefix === ''
+      ? panel.result.text
+      : `${panel.prefix} ${panel.result.text}`
+    ui.pushUndo(uiKey, { original: draft, applied: next })
+    if (panel.prefix !== undefined && panel.prefix !== '' && claimToken !== undefined) {
+      // The semantic-document form makes the host rebuild the command chip
+      // (it resolves the claim from the token and restores the node), so the
+      // composer looks the same after the fill-back as before it. The plain
+      // string would leave the token as literal text — still adjudicated as
+      // the command on Enter, but no longer a chip.
+      inputActions.setDraft({ text: next, references: [], command: { token: panel.prefix } } as never)
+    } else {
+      inputActions.setDraft(next)
+    }
     ui.closePanel()
-  }, [draft, inputActions, panel, uiKey])
+  }, [claimToken, draft, inputActions, panel, uiKey])
 
   if (!settings.enabled) return null
 

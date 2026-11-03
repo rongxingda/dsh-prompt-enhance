@@ -23,6 +23,22 @@ describe('Config schema', () => {
     expect(fields).toContain('provider')
     expect(fields).toContain('model')
   })
+
+  it('ships an 8192-token output budget, and the schema default agrees', () => {
+    // Why 8192: ordinary long prompts reached the old 2048 budget, the model
+    // stopped on `max-tokens`, and the enhancement was refused outright (no
+    // partial result is ever filled back), so a user had to find the setting
+    // before one long rewrite could succeed at all.
+    //
+    // The mirror half matters as much as the number: the settings page reads
+    // the schema `default(...)`, and the request path reads `DEFAULT_CONFIG`.
+    // A change to one that forgets the other ships a field whose displayed
+    // default is not what the code uses.
+    expect(DEFAULT_CONFIG.maxOutputTokens).toBe(8192)
+    const entry = Object.entries(Config.dict ?? {}).find(([key]) => key === 'maxOutputTokens')
+    const meta = (entry?.[1] as { meta?: { default?: unknown } } | undefined)?.meta
+    expect(meta?.default).toBe(DEFAULT_CONFIG.maxOutputTokens)
+  })
 })
 
 describe('resolveConfig', () => {

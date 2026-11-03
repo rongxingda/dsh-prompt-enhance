@@ -17,6 +17,13 @@ export interface PanelState {
   readonly phase: 'loading' | 'result' | 'error'
   /** The draft as it was when the request started (never mutated). */
   readonly original: string
+  /**
+   * The leading command token (for example `/计划`) that was kept OUT of the
+   * rewrite, or undefined for an ordinary draft. `original` stays the full
+   * draft — undo restores it and the stale check compares against it — while
+   * this is what the apply path puts back in front of the result.
+   */
+  readonly prefix?: string
   readonly result?: EnhanceResult
   readonly error?: EnhanceError
   /** Cancels the in-flight request; absent once settled. */
@@ -162,14 +169,14 @@ export function openLoading(state: Omit<PanelState, 'phase' | 'result' | 'error'
 /** Settle the open panel with a result. Ignored when the panel moved on. */
 export function settleResult(sessionId: string, result: EnhanceResult): void {
   if (panelState?.sessionId !== sessionId || panelState.phase !== 'loading') return
-  panelState = { sessionId, phase: 'result', original: panelState.original, result }
+  panelState = { sessionId, phase: 'result', original: panelState.original, ...(panelState.prefix === undefined ? {} : { prefix: panelState.prefix }), result }
   notify()
 }
 
 /** Settle the open panel with an error. Ignored when the panel moved on. */
 export function settleError(sessionId: string, error: EnhanceError): void {
   if (panelState?.sessionId !== sessionId || panelState.phase !== 'loading') return
-  panelState = { sessionId, phase: 'error', original: panelState.original, error }
+  panelState = { sessionId, phase: 'error', original: panelState.original, ...(panelState.prefix === undefined ? {} : { prefix: panelState.prefix }), error }
   notify()
 }
 

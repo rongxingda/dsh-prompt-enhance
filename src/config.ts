@@ -68,7 +68,7 @@ export interface Config {
 export const DEFAULT_CONFIG: Config = {
   enabled: true,
   temperature: 0.3,
-  maxOutputTokens: 2048,
+  maxOutputTokens: 8192,
   maxInputChars: 12000,
   timeoutMs: 60000,
   systemPrompt: '',

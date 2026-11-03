@@ -99,7 +99,7 @@ dsh plugin --profile web remove dsh-prompt-enhance
 
 **Composer button / shortcut** — type (or leave) a draft, hit ✨ or `Ctrl+Alt+E`:
 
-1. Local guards run first: empty drafts, over-length drafts (never auto-truncated — that would change your meaning), images-only drafts, and drafts containing command or file-reference chips are refused with a clear message. Chips are rejected because filling back would destroy them.
+1. Local guards run first: empty drafts, over-length drafts (never auto-truncated — that would change your meaning) and images-only drafts are refused with a clear message. A **file-reference** chip in the draft is refused too (filling back would destroy it); a **command** chip at the start (e.g. `/计划`) is not — only the text after the token is enhanced, and the token is kept in front of the result.
 2. The preview panel opens with a cancellable spinner. Your draft stays untouched — the hint says so.
 3. The result phase shows both texts side by side. **Apply** fills the enhanced text back and raises the undo bar; **Copy** puts it on the clipboard; **Cancel** (or `Esc`, or clicking the overlay) discards everything.
 4. The undo bar sits above the composer: one click restores the original. If you keep typing after applying, the bar quietly retires itself so stale text can never overwrite newer edits. Undo entries live **only in the current page's memory** (up to 3 per session) — a page reload, a web restart, or a session switch clears them.
@@ -117,7 +117,7 @@ Everything lives in the `prompt-enhance` settings namespace, edited from the web
 | `enabled` | `true` | Master switch; off hides the button and disables every trigger |
 | `provider` + `model` | empty | Explicit route override; must be filled as a **pair** (or both empty to follow the current session model) |
 | `temperature` | `0.3` | Low temperature keeps the rewrite faithful to the original |
-| `maxOutputTokens` | `2048` | Output token budget of one enhancement call |
+| `maxOutputTokens` | `8192` | Output token budget of one enhancement call |
 | `maxInputChars` | `12000` | Input character cap (counted in Unicode code points — an emoji is one character); over-limit drafts are **rejected, never truncated** |
 | `timeoutMs` | `60000` | End-to-end deadline of one call |
 | `systemPrompt` | built-in strategy | Custom strategy text; how it combines with the built-in strategy is set by `strategyMode` |
@@ -155,7 +155,8 @@ Set `systemPrompt` in the settings to use your own strategy; `strategyMode` deci
 | Empty / whitespace / invisible-only draft | Local refusal: "input box is empty" |
 | Draft over `maxInputChars` | Rejected locally and at the route with exact counts; **no auto-truncation** |
 | Images attached but no text | Refused: text-only feature |
-| Command or file-reference chips in the draft | Refused: fill-back would destroy the chips |
+| Command chip at the start of the draft (e.g. `/计划`) | Supported: the token stays out of the rewrite and is put back in front of the result; a command with no text after it is refused with its own message |
+| File-reference chips in the draft | Refused: fill-back would destroy the chips |
 | Submitting / busy phase or a request already in flight | Refused with "try again in a moment" |
 | Per-minute cap exceeded | `429` (`rate-limit`) with a `Retry-After` in seconds; the host message names the exact wait. The window counts successful calls only — failures do not consume it |
 | Concurrency cap full | `429` (`concurrency-limit`), no `Retry-After` — a slot frees whenever an in-flight call settles |

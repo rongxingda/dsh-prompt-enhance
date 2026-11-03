@@ -40,6 +40,8 @@ interface InputState {
   readonly imageIds?: readonly unknown[]
   readonly occurrences: readonly { readonly hint?: string }[]
   readonly phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'
+  /** The leading command claim a 0.2.x host publishes alongside the chip. */
+  readonly claim?: { readonly token: string }
   readonly draftRev: number
   readonly queue: readonly unknown[]
 }
@@ -205,6 +207,73 @@ describe('EnhanceButton guard chain', () => {
     expect(screen.queryByText(zh['error.attachmentsOnly'])).toBeNull()
     expect(screen.queryByText(zh['error.occurrences'])).toBeNull()
     expect(input).toBeDefined()
+  })
+})
+
+describe('claimed command chip (/plan)', () => {
+  afterEach(cleanup)
+
+  // Regression: the composer's submit machine reports `phase: 'claimed'` while
+  // a leading command chip waits for its arguments — the exact state a user is
+  // in after picking /计划 and typing their request. The guard chain used to
+  // treat it as "busy (submitting)" and refused outright, so the enhancement
+  // was unusable for the whole class of prompts that start with a command.
+  it('enhances only the body and keeps the command in front of the result', async () => {
+    const input = makeFakeInput({ draft: '/计划 把登录页做成暗色主题', phase: 'claimed', claim: { token: '/计划 ' } })
+    const setDraft = vi.fn((text: string | { text: string }) => input.set({ draft: typeof text === 'string' ? text : text.text }))
+    renderComposer(input, { setDraft } as never, 's3')
+    vi.mocked(requestEnhance).mockResolvedValue({ text: '增强后的正文', provider: 'p', model: 'm', elapsedMs: 3 })
+
+    fireEvent.click(enhanceButton())
+    expect(await screen.findByText('增强后的正文')).toBeTruthy()
+    // The command token is not part of the prompt the model sees.
+    expect(requestEnhance).toHaveBeenCalledWith({ sessionId: 's3', text: '把登录页做成暗色主题' }, expect.anything())
+
+    fireEvent.click(screen.getByRole('button', { name: zh['panel.apply'] }))
+    const applied = setDraft.mock.calls[0]?.[0] as string | { text: string; command?: { token: string } }
+    const next = typeof applied === 'string' ? applied : applied.text
+    expect(next).toBe('/计划 增强后的正文')
+    // The host is handed the semantic form so it can rebuild the chip instead
+    // of leaving the token behind as literal text.
+    expect(typeof applied).toBe('object')
+    expect((applied as { command?: { token: string } }).command).toEqual({ token: '/计划' })
+
+    // Undo restores the full original draft, command included.
+    fireEvent.click(screen.getByRole('button', { name: zh['undo.undo'] }))
+    expect(setDraft).toHaveBeenLastCalledWith('/计划 把登录页做成暗色主题')
+  })
+
+  it('refuses a claimed command with no body yet, and calls no model', () => {
+    const input = makeFakeInput({ draft: '/计划 ', phase: 'claimed', claim: { token: '/计划 ' } })
+    renderComposer(input, { setDraft: vi.fn() } as never, 's4')
+
+    fireEvent.click(enhanceButton())
+    expect(screen.getByText(zh['error.commandEmpty'])).toBeTruthy()
+    expect(requestEnhance).not.toHaveBeenCalled()
+    expect(requestEnhanceStream).not.toHaveBeenCalled()
+  })
+
+  // Hosts on the 0.1.x line publish `phase` but not the claim object; the draft
+  // prefix carries the same information.
+  it('splits the token from the draft when the host publishes no claim', async () => {
+    const input = makeFakeInput({ draft: '/计划 写一份周报', phase: 'claimed' })
+    renderComposer(input, { setDraft: vi.fn() } as never, 's5')
+    vi.mocked(requestEnhance).mockResolvedValue({ text: '改写', provider: 'p', model: 'm', elapsedMs: 1 })
+
+    fireEvent.click(enhanceButton())
+    expect(await screen.findByText('改写')).toBeTruthy()
+    expect(requestEnhance).toHaveBeenCalledWith({ sessionId: 's5', text: '写一份周报' }, expect.anything())
+  })
+
+  // A command claim must not weaken the genuine busy guard: a send in flight
+  // still refuses.
+  it('still refuses a genuinely busy phase', () => {
+    const input = makeFakeInput({ draft: '文本', phase: 'submitting' })
+    renderComposer(input, { setDraft: vi.fn() } as never, 's6')
+
+    fireEvent.click(enhanceButton())
+    expect(screen.getByText(zh['error.phase'])).toBeTruthy()
+    expect(requestEnhance).not.toHaveBeenCalled()
   })
 })
 
