@@ -2,7 +2,9 @@
 
 All notable changes are documented here. Versions follow [npm](https://www.npmjs.com/package/dsh-prompt-enhance); releases from **0.2.3** onward also have a [GitHub Release](https://github.com/rongxingda/dsh-prompt-enhance/releases) page with notes (0.2.0–0.2.2 are tagged but have no Release page — see this file for their notes).
 
-## Unreleased
+## 0.3.4 (2026-11-03)
+
+Two changes that make the plugin cheaper and less likely to refuse an ordinary draft, plus the `0.2.1-rc.5` adaptation that shipped as `0.3.3` and never reached npm (it changed no production file, so there was nothing to publish on its own). Both feature halves arrived as outside pull requests — `#8` and the first commit of `#10` — and are landed with their authors' commits intact.
 
 **Adds `reasoningEffort`.** The plugin never set a reasoning budget, so every enhancement inherited whatever the routed model calls its default — and for a rewriting task that default is almost entirely waste. Measured on one and the same draft with `deepseek-flash`: **252** output tokens at `off` against **2897** at `high`, an 11× difference producing the same rewrite. Enhancement happens on every shortcut press, so that multiplier is the whole cost of the feature.
 
@@ -12,7 +14,15 @@ The interesting half is the route that cannot take the field at all. A model who
 
 Two regression traps are pinned by tests rather than by comment. First, the retry needs a **fresh** assembler and iterator per attempt — reusing either splices the first attempt's partial blocks into the second attempt's result. Second, an earlier version of the retry test stubbed the refusal as a *throw* and passed while a live host kept failing, because the real refusal is a chunk; the helper now builds the exact chunk shape from the harness source, and a separate case pins the thrown variant to the same observable behaviour. Retrying is also bounded to one attempt: when `inherit` is already in force the refusal cannot be about the effort, so it is surfaced as-is instead of spending quota twice.
 
-Verification: six new cases in `tests/enhancer.test.ts` (forwarding, `inherit` omission, one-shot downgrade with the second request verified to carry no field, no-retry under `inherit`, no-retry-of-the-retry, thrown-refusal parity), three in `tests/config.test.ts` (default, explicit values, and degradation of an absent or hand-edited value). `tests/config.test.ts`'s exhaustive key list gained `reasoningEffort`, which is what that assertion is for. Suite: **24 files / 255 cases green** (was 246; the 0.3.2 baseline plus these nine); `lib/` rebuilt; typecheck clean. Both READMEs document the field, the measured numbers, and the no-reasoning fallback.
+**Raises the default `maxOutputTokens` to 8192.** A long, structured draft — the plugin's normal input — regularly needs more than the old 2048 budget; when the rewrite reaches it, the model stops on `max-tokens` and the enhancement is refused with no partial result, so the shipped default made a user hit the failure once and then go find the setting before a single long rewrite could succeed. 8192 keeps the call bounded and per-profile overridable, and a test pins both halves of the default: `DEFAULT_CONFIG` (the request path) and the schema `default(...)` (what the settings page displays).
+
+**Measured on a real `0.2.1-rc.5` host**, with the same draft and the same route (`deepseek-official` / `deepseek-flash`): `off` produced **176** output tokens in 1.6 s, `inherit` produced **322** in 3.6 s — so the field really reaches the adapter, and the difference is not only theoretical. The settings page also gained a 17th field without losing the other 16: `--dump-config-schema` still projects the entry with every field carrying `x-cordis.volatile`.
+
+**Not included, on purpose.** The second half of `#10` — enhancing a draft that starts with a command chip — is held back. It fills the result back through `setDraft({ text, references, command })`, an object form the host *implements* (`resolveDraftInput`) but does not publish in `InputActions.setDraft(text: string)`; it only compiles behind an `as never`. Merging a write whose contract is undocumented, into the path that overwrites the user's draft, is not worth the risk without a live click-through. The PR stays open with that reasoning.
+
+Suite: **24 files / 256 cases green** (was 246); typecheck clean; `lib/` rebuilt.
+
+Verification: six new cases in `tests/enhancer.test.ts` (forwarding, `inherit` omission, one-shot downgrade with the second request verified to carry no field, no-retry under `inherit`, no-retry-of-the-retry, thrown-refusal parity), three in `tests/config.test.ts` (default, explicit values, and degradation of an absent or hand-edited value). `tests/config.test.ts`'s exhaustive key list gained `reasoningEffort`, which is what that assertion is for. Suite: **24 files / 256 cases green** (was 246; the 0.3.2 baseline, the `maxOutputTokens` case, and these nine); `lib/` rebuilt; typecheck clean. Both READMEs document the field, the measured numbers, and the no-reasoning fallback.
 ## 0.3.3 (2026-11-03)
 
 Moves the build onto `@deepseek-ai/dsh-*@0.2.1-rc.5`, the current `latest`, and records the uncomfortable half of that sentence: **not one line of plugin code had to change**. Everything that looks like adaptation here is bookkeeping, a diff, and a real-host run — which is exactly what should happen when an upstream point release does not touch your contracts, and exactly what is worth documenting rather than dressing up.
@@ -23,7 +33,7 @@ Moves the build onto `@deepseek-ai/dsh-*@0.2.1-rc.5`, the current `latest`, and 
 
 **One thing worth knowing about `rc.5`.** The web app now prints its URL with a `?token=` and the CLI exposes `--trusted-host` for the `/api` browser-trust fence, but a route registered through the shared `webServer` — this plugin's — is not behind that fence: a token-less request from a loopback socket still answered, as before. The loopback / `Host` / pinned-`Origin` fence is therefore still the whole of this route's admission control, and the 0.3.2 hardenings still carry it.
 
-Suite: **24 files / 246 cases green** (unchanged — no production file was touched); typecheck clean; `lib/` rebuilt and byte-identical, so the published artifact for `0.3.2` and `0.3.3` differ only in metadata and docs.
+Suite: **24 files / 246 cases green** (unchanged — no production file was touched); typecheck clean; `lib/` rebuilt and byte-identical to 0.3.2's, so this version added no behaviour and was never published on its own — its work ships inside 0.3.4.
 
 ## 0.3.2 (2026-10-22)
 
